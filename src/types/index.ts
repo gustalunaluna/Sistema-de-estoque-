@@ -110,6 +110,50 @@ export interface MoldeItem {
   cor: string;
 }
 
+export interface FichaCabecalho {
+  cliente: string;
+  representante: string;
+  pedido: string;
+  refCliente: string;
+  refMatriz: string;
+  colecao: string;
+  qtdMostruario: number;
+  custoConfeccaoUnid: number;
+  quantidadeFicha: number;
+  dataPedido: string;
+  dataEntrega: string;
+  inicioProducao: string;
+  terminoProducao: string;
+  oficina: string;
+  telefone: string;
+  cortador: string;
+  qtdMoldesTotal: number;
+  qtdGabaritos: number;
+}
+
+export interface TecidoCorte {
+  id: string;
+  descricao: string;
+  unidade: string;
+  variante1: string;
+  total1: number;
+  folhas1: number;
+  variante2: string;
+  total2: number;
+  folhas2: number;
+}
+
+export interface AviamentoFicha {
+  id: string;
+  descricao: string;
+  unidade: number;
+  variante: string;
+  total: number;
+  enviada: number;
+  responsavel: string;
+  secao: 'aviamentos' | 'acabamento' | 'cliente' | 'travetes';
+}
+
 export interface FichaTecnica {
   id: string;
   modeloId: string;
@@ -122,6 +166,9 @@ export interface FichaTecnica {
   checkList: CheckListItem[];
   romaneio: RomaneioData;
   relatorio: RelatorioProducao;
+  cabecalho: FichaCabecalho;
+  tecidosCorte: TecidoCorte[];
+  aviamentosFicha: AviamentoFicha[];
   criadoEm: string;
   atualizadoEm: string;
 }

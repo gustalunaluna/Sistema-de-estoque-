@@ -1,22 +1,42 @@
 import { useState, useRef } from 'react';
 import { Plus, Search, Edit2, Trash2, FileText, X, Upload, Download, CheckCircle, AlertCircle, Package } from 'lucide-react';
+import { v4 as uuidv4 } from 'uuid';
 import { useStore } from '../store/useStore';
-import type { FichaTecnica, ItemFichaTecnica, SecaoFicha } from '../types';
+import type {
+  FichaTecnica, ItemFichaTecnica, SecaoFicha,
+  MoldeItem, CheckListItem, TecidoCorte, AviamentoFicha, FichaCabecalho, CategoriaModelo,
+} from '../types';
 import Modal from '../components/Modal';
 import Badge from '../components/Badge';
 import { parseExcelFicha, processarImport, exportarFichaExcel } from '../utils/excelFicha';
 
 const SECAO_LABELS: Record<SecaoFicha, string> = {
   corte: 'Corte',
-  aviamentos: 'Aviamentos',
+  aviamentos: 'Aviamentos 1',
   acabamento: 'Acabamento',
   cliente: 'Cliente',
   travetes: 'Travetes',
 };
 
-type ViewTab = 'materiais' | 'corte' | 'aviamentos' | 'checklist' | 'romaneio' | 'relatorio';
+type FormTab = 'cabecalho' | 'tecidos' | 'aviamentos' | 'moldes' | 'checklist' | 'romaneio' | 'relatorio';
+type ViewTab = 'cabecalho' | 'tecidos' | 'aviamentos' | 'moldes' | 'checklist' | 'romaneio' | 'relatorio';
+type AviSecao = 'aviamentos' | 'acabamento' | 'cliente' | 'travetes';
 
-const emptyForm = (modeloId = ''): Omit<FichaTecnica, 'id' | 'criadoEm' | 'atualizadoEm'> => ({
+const DEFAULT_CABECALHO = (): FichaCabecalho => ({
+  cliente: '', representante: '', pedido: '', refCliente: '', refMatriz: '',
+  colecao: '', qtdMostruario: 0, custoConfeccaoUnid: 0, quantidadeFicha: 0,
+  dataPedido: '', dataEntrega: '', inicioProducao: '', terminoProducao: '',
+  oficina: '', telefone: '', cortador: '', qtdMoldesTotal: 0, qtdGabaritos: 0,
+});
+
+type FormState = Omit<FichaTecnica, 'id' | 'criadoEm' | 'atualizadoEm'> & {
+  criarNovoModelo: boolean;
+  novoModeloNome: string;
+  novoModeloCodigo: string;
+  novoModeloCategoria: CategoriaModelo;
+};
+
+const emptyForm = (modeloId = ''): FormState => ({
   modeloId,
   itens: [],
   tempoProdução: 0,
@@ -26,19 +46,37 @@ const emptyForm = (modeloId = ''): Omit<FichaTecnica, 'id' | 'criadoEm' | 'atual
   moldes: [],
   checkList: [],
   romaneio: { oficina: '', telefone: '', dataEnvio: '', dataRetirada: '', qtdEnviada: 0, desconto: 0, totalFicha: 0, observacoes: '' },
-  relatorio: { oficina: '', prazoEntrega: '', corteTecidosOk: null, corteAviamentosOk: null, retalhosTecidosOk: null, retalhosAviamentosOk: null, notaQualidade: 0, notaOrganizacao: 0, diasAtraso: 0, qtdDefeitos: 0, observacoes: '' },
+  relatorio: {
+    oficina: '', prazoEntrega: '',
+    corteTecidosOk: null, corteAviamentosOk: null,
+    retalhosTecidosOk: null, retalhosAviamentosOk: null,
+    notaQualidade: 0, notaOrganizacao: 0, diasAtraso: 0, qtdDefeitos: 0, observacoes: '',
+  },
+  cabecalho: DEFAULT_CABECALHO(),
+  tecidosCorte: [],
+  aviamentosFicha: [],
+  criarNovoModelo: false,
+  novoModeloNome: '',
+  novoModeloCodigo: '',
+  novoModeloCategoria: 'bolsas',
 });
 
 export default function FichasTecnicas() {
   const store = useStore();
-  const { fichasTecnicas, addFichaTecnica, updateFichaTecnica, deleteFichaTecnica, modelos, insumos, addInsumo, addModelo, clientes } = store;
+  const {
+    fichasTecnicas, addFichaTecnica, updateFichaTecnica, deleteFichaTecnica,
+    modelos, insumos, addInsumo, addModelo, clientes,
+  } = store;
+
   const [search, setSearch] = useState('');
   const [modalAdd, setModalAdd] = useState(false);
   const [modalEdit, setModalEdit] = useState<FichaTecnica | null>(null);
   const [modalView, setModalView] = useState<FichaTecnica | null>(null);
   const [modalImport, setModalImport] = useState(false);
-  const [form, setForm] = useState(emptyForm());
-  const [viewTab, setViewTab] = useState<ViewTab>('materiais');
+  const [form, setForm] = useState<FormState>(emptyForm());
+  const [formTab, setFormTab] = useState<FormTab>('cabecalho');
+  const [viewTab, setViewTab] = useState<ViewTab>('cabecalho');
+  const [aviSecao, setAviSecao] = useState<AviSecao>('aviamentos');
 
   // Import state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -59,24 +97,106 @@ export default function FichasTecnicas() {
     (f.modelo?.codigo.toLowerCase().includes(search.toLowerCase()) ?? false)
   );
 
-  const calcCustoMateriais = (itens: ItemFichaTecnica[]) =>
-    itens.reduce((sum, item) => {
-      const ins = insumos.find(i => i.id === item.insumoId);
-      return sum + (ins?.valorUnitario ?? 0) * item.quantidade;
-    }, 0);
+  // ─── FORM HELPERS ────────────────────────────────────────────────────────────
+  const setCab = (patch: Partial<FichaCabecalho>) =>
+    setForm(f => ({ ...f, cabecalho: { ...f.cabecalho, ...patch } }));
 
-  const calcCustoTotal = (f: typeof form) => calcCustoMateriais(f.itens) + f.custoMaoDeObra + f.outrosCustos;
-  const calcPrecoVenda = (f: typeof form) => calcCustoTotal(f) * (1 + f.margemLucro / 100);
+  const addTecido = () =>
+    setForm(f => ({
+      ...f,
+      tecidosCorte: [...f.tecidosCorte, {
+        id: uuidv4(), descricao: '', unidade: '', variante1: '', total1: 0,
+        folhas1: 0, variante2: '', total2: 0, folhas2: 0,
+      }],
+    }));
 
-  const addItem = () => setForm(f => ({ ...f, itens: [...f.itens, { insumoId: '', quantidade: 1, secao: 'corte' as SecaoFicha }] }));
-  const removeItem = (idx: number) => setForm(f => ({ ...f, itens: f.itens.filter((_, i) => i !== idx) }));
-  const updateItem = (idx: number, data: Partial<ItemFichaTecnica>) =>
-    setForm(f => ({ ...f, itens: f.itens.map((it, i) => i === idx ? { ...it, ...data } : it) }));
+  const removeTecido = (id: string) =>
+    setForm(f => ({ ...f, tecidosCorte: f.tecidosCorte.filter(t => t.id !== id) }));
 
-  const handleAdd = () => { addFichaTecnica(form); setForm(emptyForm()); setModalAdd(false); };
-  const handleEdit = () => { if (!modalEdit) return; updateFichaTecnica(modalEdit.id, form); setModalEdit(null); };
-  const openEdit = (ficha: FichaTecnica) => { setForm({ ...ficha }); setModalEdit(ficha); };
-  const openView = (ficha: FichaTecnica) => { setModalView(ficha); setViewTab('materiais'); };
+  const updateTecido = (id: string, patch: Partial<TecidoCorte>) =>
+    setForm(f => ({ ...f, tecidosCorte: f.tecidosCorte.map(t => t.id === id ? { ...t, ...patch } : t) }));
+
+  const addAviamento = () =>
+    setForm(f => ({
+      ...f,
+      aviamentosFicha: [...f.aviamentosFicha, {
+        id: uuidv4(), descricao: '', unidade: 0, variante: '',
+        total: 0, enviada: 0, responsavel: '', secao: aviSecao,
+      }],
+    }));
+
+  const removeAviamento = (id: string) =>
+    setForm(f => ({ ...f, aviamentosFicha: f.aviamentosFicha.filter(a => a.id !== id) }));
+
+  const updateAviamento = (id: string, patch: Partial<AviamentoFicha>) =>
+    setForm(f => ({ ...f, aviamentosFicha: f.aviamentosFicha.map(a => a.id === id ? { ...a, ...patch } : a) }));
+
+  const addMolde = () =>
+    setForm(f => ({
+      ...f,
+      moldes: [...f.moldes, { id: uuidv4(), numero: String(f.moldes.length + 1), descricao: '', quantidade: '', cor: '' }],
+    }));
+
+  const removeMolde = (id: string) =>
+    setForm(f => ({ ...f, moldes: f.moldes.filter(m => m.id !== id) }));
+
+  const updateMolde = (id: string, patch: Partial<MoldeItem>) =>
+    setForm(f => ({ ...f, moldes: f.moldes.map(m => m.id === id ? { ...m, ...patch } : m) }));
+
+  const addCheckItem = () =>
+    setForm(f => ({
+      ...f,
+      checkList: [...f.checkList, { id: uuidv4(), descricao: '', ok: null, responsavel: '', obs: '' }],
+    }));
+
+  const removeCheckItem = (id: string) =>
+    setForm(f => ({ ...f, checkList: f.checkList.filter(c => c.id !== id) }));
+
+  const updateCheckItem = (id: string, patch: Partial<CheckListItem>) =>
+    setForm(f => ({ ...f, checkList: f.checkList.map(c => c.id === id ? { ...c, ...patch } : c) }));
+
+  // ─── SAVE HANDLERS ───────────────────────────────────────────────────────────
+  const handleAdd = () => {
+    let modeloId = form.modeloId;
+    if (form.criarNovoModelo) {
+      addModelo({
+        nome: form.novoModeloNome,
+        codigo: form.novoModeloCodigo,
+        categoria: form.novoModeloCategoria,
+        galeria: [],
+        descricao: '',
+        observacoes: '',
+        status: 'desenvolvimento',
+      });
+      const criado = useStore.getState().modelos.find(m => m.nome === form.novoModeloNome && m.codigo === form.novoModeloCodigo);
+      if (!criado) return;
+      modeloId = criado.id;
+    }
+    addFichaTecnica({ ...form, modeloId });
+    setForm(emptyForm());
+    setFormTab('cabecalho');
+    setModalAdd(false);
+  };
+
+  const handleEdit = () => {
+    if (!modalEdit) return;
+    updateFichaTecnica(modalEdit.id, form);
+    setModalEdit(null);
+  };
+
+  const openEdit = (ficha: FichaTecnica) => {
+    setForm({
+      ...emptyForm(),
+      ...ficha,
+      cabecalho: ficha.cabecalho ?? DEFAULT_CABECALHO(),
+      tecidosCorte: ficha.tecidosCorte ?? [],
+      aviamentosFicha: ficha.aviamentosFicha ?? [],
+    });
+    setFormTab('cabecalho');
+    setModalEdit(ficha);
+  };
+
+  const openView = (ficha: FichaTecnica) => { setModalView(ficha); setViewTab('cabecalho'); };
 
   const toggleCheckItem = (itemId: string, ok: boolean | null) => {
     if (!modalView) return;
@@ -85,41 +205,7 @@ export default function FichasTecnicas() {
     setModalView(prev => prev ? { ...prev, checkList: newCheckList } : prev);
   };
 
-  const ItensTable = ({ itens }: { itens: ItemFichaTecnica[] }) => (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="bg-slate-50 text-left text-xs text-slate-500">
-          <th className="p-2">Material</th>
-          <th className="p-2">Seção</th>
-          <th className="p-2">Qtd</th>
-          <th className="p-2">Unid.</th>
-          <th className="p-2">Vlr. Unit.</th>
-          <th className="p-2">Total</th>
-        </tr>
-      </thead>
-      <tbody>
-        {itens.map((item, i) => {
-          const ins = insumos.find(x => x.id === item.insumoId);
-          return (
-            <tr key={i} className="border-b border-slate-50">
-              <td className="p-2 font-medium">{ins?.nome ?? '—'}</td>
-              <td className="p-2 text-slate-400 text-xs">{item.secao ? (SECAO_LABELS[item.secao] ?? item.secao) : '—'}</td>
-              <td className="p-2">{item.quantidade}</td>
-              <td className="p-2 text-slate-400">{ins?.unidade}</td>
-              <td className="p-2">R$ {(ins?.valorUnitario ?? 0).toFixed(2)}</td>
-              <td className="p-2 font-medium">R$ {((ins?.valorUnitario ?? 0) * item.quantidade).toFixed(2)}</td>
-            </tr>
-          );
-        })}
-        {itens.length === 0 && (
-          <tr><td colSpan={6} className="p-4 text-center text-slate-400 text-xs">Nenhum item nesta seção</td></tr>
-        )}
-      </tbody>
-    </table>
-  );
-
   // ─── IMPORT ──────────────────────────────────────────────────────────────────
-
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -131,11 +217,10 @@ export default function FichasTecnicas() {
       const processed = processarImport(parsed, insumos);
       setImportPreview({ parsed, processed });
       setImportStatus('preview');
-    } catch (err) {
+    } catch {
       setImportError('Erro ao ler o arquivo. Verifique se é um Excel (.xlsx) válido.');
       setImportStatus('error');
     }
-    // Reset file input so the same file can be re-selected
     e.target.value = '';
   };
 
@@ -143,10 +228,8 @@ export default function FichasTecnicas() {
     if (!importPreview) return;
     const { processed } = importPreview;
 
-    // 1. Criar novos insumos e guardar os IDs gerados
-    const novosInsumosIds: Record<string, string> = {}; // nome lowercase -> id
+    const novosInsumosIds: Record<string, string> = {};
     processed.insumosParaCriar.forEach(insumoData => {
-      // Check again it doesn't exist (race condition guard)
       const existing = insumos.find(i =>
         i.nome.toLowerCase().trim().includes(insumoData.nome.toLowerCase().trim())
       );
@@ -154,24 +237,20 @@ export default function FichasTecnicas() {
         novosInsumosIds[insumoData.nome.toLowerCase().trim()] = existing.id;
       } else {
         addInsumo(insumoData);
-        // The store adds the item synchronously, get the latest
         const added = useStore.getState().insumos.find(i => i.nome === insumoData.nome);
         if (added) novosInsumosIds[insumoData.nome.toLowerCase().trim()] = added.id;
       }
     });
 
-    // 2. Criar o modelo na pilotagem
     addModelo(processed.modeloNovo);
     const modeloCriado = useStore.getState().modelos.find(m => m.nome === processed.modeloNovo.nome);
     if (!modeloCriado) return;
 
-    // 3. Montar itens da ficha resolvendo IDs
     const insumosAtualizados = useStore.getState().insumos;
     const itensFicha: ItemFichaTecnica[] = processed.insumosResolvidos
       .map(r => {
         let insumoId = r.insumoExistenteId;
         if (!insumoId && r.isNovo) {
-          // Try to find by name in the now-updated store
           const found = insumosAtualizados.find(i =>
             i.nome.toLowerCase().trim().includes(r.insumoNome.toLowerCase().trim()) ||
             r.insumoNome.toLowerCase().trim().includes(i.nome.toLowerCase().trim())
@@ -183,7 +262,6 @@ export default function FichasTecnicas() {
       })
       .filter(Boolean) as ItemFichaTecnica[];
 
-    // 4. Criar a ficha técnica
     addFichaTecnica({
       ...processed.fichaNova,
       modeloId: modeloCriado.id,
@@ -212,73 +290,524 @@ export default function FichasTecnicas() {
     exportarFichaExcel(modelo, ficha, insumos, clienteNome);
   };
 
-  // ─── FORM ────────────────────────────────────────────────────────────────────
-  const FichaForm = () => {
-    const custo = calcCustoTotal(form);
-    const preco = calcPrecoVenda(form);
+  // ─── TAB BAR COMPONENT ───────────────────────────────────────────────────────
+  const FormTabBar = () => {
+    const tabs: [FormTab, string][] = [
+      ['cabecalho', 'Cabeçalho'],
+      ['tecidos', 'Tecidos'],
+      ['aviamentos', 'Aviamentos'],
+      ['moldes', 'Moldes'],
+      ['checklist', 'Check List'],
+      ['romaneio', 'Romaneio'],
+      ['relatorio', 'Relatório'],
+    ];
     return (
-      <div className="space-y-5">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Modelo</label>
-          <select className="input" value={form.modeloId} onChange={e => setForm(f => ({ ...f, modeloId: e.target.value }))}>
-            <option value="">Selecione um modelo...</option>
-            {modelos.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.codigo})</option>)}
-          </select>
-        </div>
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold text-slate-700">Materiais</h3>
-            <button type="button" onClick={addItem} className="text-xs text-blue-600 flex items-center gap-1 hover:underline">
-              <Plus size={12} /> Adicionar item
-            </button>
-          </div>
-          <div className="space-y-2">
-            {form.itens.map((item, idx) => {
-              const ins = insumos.find(i => i.id === item.insumoId);
-              return (
-                <div key={idx} className="flex gap-2 items-center bg-slate-50 rounded-lg p-2">
-                  <select className="input flex-1 text-sm" value={item.insumoId} onChange={e => updateItem(idx, { insumoId: e.target.value })}>
-                    <option value="">Selecione o material...</option>
-                    {insumos.map(i => <option key={i.id} value={i.id}>{i.nome} ({i.unidade})</option>)}
-                  </select>
-                  <select className="input w-28 text-sm" value={item.secao ?? 'corte'} onChange={e => updateItem(idx, { secao: e.target.value as SecaoFicha })}>
-                    <option value="corte">Corte</option>
-                    <option value="aviamentos">Aviamentos</option>
-                    <option value="acabamento">Acabamento</option>
-                    <option value="cliente">Cliente</option>
-                    <option value="travetes">Travetes</option>
-                  </select>
-                  <input type="number" className="input w-20 text-sm" value={item.quantidade} min="0" step="0.01"
-                    onChange={e => updateItem(idx, { quantidade: Number(e.target.value) })} placeholder="Qtd" />
-                  {ins && <span className="text-xs text-slate-500 w-20 text-right">R$ {(ins.valorUnitario * item.quantidade).toFixed(2)}</span>}
-                  <button type="button" onClick={() => removeItem(idx)} className="text-slate-400 hover:text-red-500"><X size={14} /></button>
-                </div>
-              );
-            })}
-            {form.itens.length === 0 && <p className="text-xs text-slate-400 text-center py-3">Nenhum material adicionado</p>}
-          </div>
-          <div className="flex justify-end mt-1">
-            <span className="text-sm text-slate-600">Custo materiais: <strong className="text-slate-800">R$ {calcCustoMateriais(form.itens).toFixed(2)}</strong></span>
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div><label className="block text-sm font-medium text-slate-700 mb-1">Tempo (min)</label>
-            <input type="number" className="input" value={form.tempoProdução} onChange={e => setForm(f => ({ ...f, tempoProdução: Number(e.target.value) }))} /></div>
-          <div><label className="block text-sm font-medium text-slate-700 mb-1">Mão de Obra (R$)</label>
-            <input type="number" step="0.01" className="input" value={form.custoMaoDeObra} onChange={e => setForm(f => ({ ...f, custoMaoDeObra: Number(e.target.value) }))} /></div>
-          <div><label className="block text-sm font-medium text-slate-700 mb-1">Outros Custos (R$)</label>
-            <input type="number" step="0.01" className="input" value={form.outrosCustos} onChange={e => setForm(f => ({ ...f, outrosCustos: Number(e.target.value) }))} /></div>
-        </div>
-        <div><label className="block text-sm font-medium text-slate-700 mb-1">Margem de Lucro (%)</label>
-          <input type="number" step="1" className="input w-32" value={form.margemLucro} onChange={e => setForm(f => ({ ...f, margemLucro: Number(e.target.value) }))} /></div>
-        <div className="bg-slate-50 rounded-lg p-4 space-y-1 text-sm">
-          <div className="flex justify-between"><span className="text-slate-500">Custo total:</span><strong>R$ {custo.toFixed(2)}</strong></div>
-          <div className="flex justify-between"><span className="text-slate-500">Preço sugerido ({form.margemLucro}% margem):</span><strong className="text-green-600">R$ {preco.toFixed(2)}</strong></div>
-        </div>
+      <div className="flex gap-1 flex-wrap border-b border-slate-100 pb-2 mb-4">
+        {tabs.map(([tab, lbl]) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setFormTab(tab)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              formTab === tab ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            {lbl}
+          </button>
+        ))}
       </div>
     );
   };
 
+  // ─── FORM ────────────────────────────────────────────────────────────────────
+  const FichaForm = () => {
+    const valorTotal = form.cabecalho.custoConfeccaoUnid * form.cabecalho.quantidadeFicha;
+    const aviamentosSecao = form.aviamentosFicha.filter(a => a.secao === aviSecao);
+
+    return (
+      <div>
+        <FormTabBar />
+
+        {/* ── Tab: Cabeçalho ───────────────────────────────── */}
+        {formTab === 'cabecalho' && (
+          <div className="space-y-4">
+            {/* Modelo selector */}
+            <div className="border border-slate-200 rounded-lg p-3 space-y-3">
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.criarNovoModelo}
+                    onChange={e => setForm(f => ({ ...f, criarNovoModelo: e.target.checked }))}
+                    className="rounded"
+                  />
+                  Criar novo modelo
+                </label>
+              </div>
+              {!form.criarNovoModelo ? (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Modelo</label>
+                  <select className="input" value={form.modeloId} onChange={e => setForm(f => ({ ...f, modeloId: e.target.value }))}>
+                    <option value="">Selecione um modelo...</option>
+                    {modelos.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.codigo})</option>)}
+                  </select>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Modelo</label>
+                    <input className="input" value={form.novoModeloNome} onChange={e => setForm(f => ({ ...f, novoModeloNome: e.target.value }))} placeholder="Ex: Mochila Top" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Código</label>
+                    <input className="input" value={form.novoModeloCodigo} onChange={e => setForm(f => ({ ...f, novoModeloCodigo: e.target.value }))} placeholder="Ex: MCH-001" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Categoria</label>
+                    <select className="input" value={form.novoModeloCategoria} onChange={e => setForm(f => ({ ...f, novoModeloCategoria: e.target.value as CategoriaModelo }))}>
+                      <option value="mochilas">Mochilas</option>
+                      <option value="bolsas">Bolsas</option>
+                      <option value="pochetes">Pochetes</option>
+                      <option value="necessaires">Necessaires</option>
+                      <option value="carteiras">Carteiras</option>
+                      <option value="acessorios">Acessórios</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Cabeçalho fields */}
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Cliente</label>
+                <input className="input text-sm" value={form.cabecalho.cliente} onChange={e => setCab({ cliente: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Representante</label>
+                <input className="input text-sm" value={form.cabecalho.representante} onChange={e => setCab({ representante: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Pedido</label>
+                <input className="input text-sm" value={form.cabecalho.pedido} onChange={e => setCab({ pedido: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Ref. Cliente</label>
+                <input className="input text-sm" value={form.cabecalho.refCliente} onChange={e => setCab({ refCliente: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Ref. Matriz</label>
+                <input className="input text-sm" value={form.cabecalho.refMatriz} onChange={e => setCab({ refMatriz: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Coleção</label>
+                <input className="input text-sm" value={form.cabecalho.colecao} onChange={e => setCab({ colecao: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">QTD Mostruário LS</label>
+                <input type="number" className="input text-sm" value={form.cabecalho.qtdMostruario} onChange={e => setCab({ qtdMostruario: Number(e.target.value) })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Custo Confecção (R$/unid)</label>
+                <input type="number" step="0.01" className="input text-sm" value={form.cabecalho.custoConfeccaoUnid} onChange={e => setCab({ custoConfeccaoUnid: Number(e.target.value) })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Quantidade Ficha</label>
+                <input type="number" className="input text-sm" value={form.cabecalho.quantidadeFicha} onChange={e => setCab({ quantidadeFicha: Number(e.target.value) })} />
+              </div>
+            </div>
+
+            {/* Valor Total (auto) */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 flex justify-between items-center">
+              <span className="text-sm text-blue-700 font-medium">Valor Total (Custo × Qtd):</span>
+              <strong className="text-blue-800">R$ {valorTotal.toFixed(2)}</strong>
+            </div>
+
+            <div className="grid grid-cols-4 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Data Pedido</label>
+                <input type="date" className="input text-sm" value={form.cabecalho.dataPedido} onChange={e => setCab({ dataPedido: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Data Entrega</label>
+                <input type="date" className="input text-sm" value={form.cabecalho.dataEntrega} onChange={e => setCab({ dataEntrega: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Início Produção</label>
+                <input type="date" className="input text-sm" value={form.cabecalho.inicioProducao} onChange={e => setCab({ inicioProducao: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Término Produção</label>
+                <input type="date" className="input text-sm" value={form.cabecalho.terminoProducao} onChange={e => setCab({ terminoProducao: e.target.value })} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Oficina</label>
+                <input className="input text-sm" value={form.cabecalho.oficina} onChange={e => setCab({ oficina: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Telefone</label>
+                <input className="input text-sm" value={form.cabecalho.telefone} onChange={e => setCab({ telefone: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Cortador</label>
+                <input className="input text-sm" value={form.cabecalho.cortador} onChange={e => setCab({ cortador: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Qtd Moldes</label>
+                <input type="number" className="input text-sm" value={form.cabecalho.qtdMoldesTotal} onChange={e => setCab({ qtdMoldesTotal: Number(e.target.value) })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Qtd Gabaritos</label>
+                <input type="number" className="input text-sm" value={form.cabecalho.qtdGabaritos} onChange={e => setCab({ qtdGabaritos: Number(e.target.value) })} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Tab: Tecidos ─────────────────────────────────── */}
+        {formTab === 'tecidos' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-700">Ficha Corte — Tecidos</h3>
+              <button type="button" onClick={addTecido} className="text-xs text-blue-600 flex items-center gap-1 hover:underline">
+                <Plus size={12} /> Adicionar tecido
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border border-slate-200 rounded-lg overflow-hidden">
+                <thead className="bg-slate-50">
+                  <tr>
+                    {['Descrição', 'Unidade', 'Variante 1', 'Total 1', 'Folhas 1', 'Variante 2', 'Total 2', 'Folhas 2', ''].map(h => (
+                      <th key={h} className="p-2 text-left text-slate-500 font-medium whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {form.tecidosCorte.map(t => (
+                    <tr key={t.id} className="border-t border-slate-100">
+                      <td className="p-1"><input className="input text-xs w-28" value={t.descricao} onChange={e => updateTecido(t.id, { descricao: e.target.value })} /></td>
+                      <td className="p-1"><input className="input text-xs w-20" value={t.unidade} onChange={e => updateTecido(t.id, { unidade: e.target.value })} /></td>
+                      <td className="p-1"><input className="input text-xs w-24" value={t.variante1} onChange={e => updateTecido(t.id, { variante1: e.target.value })} /></td>
+                      <td className="p-1"><input type="number" className="input text-xs w-16" value={t.total1} onChange={e => updateTecido(t.id, { total1: Number(e.target.value) })} /></td>
+                      <td className="p-1"><input type="number" className="input text-xs w-16" value={t.folhas1} onChange={e => updateTecido(t.id, { folhas1: Number(e.target.value) })} /></td>
+                      <td className="p-1"><input className="input text-xs w-24" value={t.variante2} onChange={e => updateTecido(t.id, { variante2: e.target.value })} /></td>
+                      <td className="p-1"><input type="number" className="input text-xs w-16" value={t.total2} onChange={e => updateTecido(t.id, { total2: Number(e.target.value) })} /></td>
+                      <td className="p-1"><input type="number" className="input text-xs w-16" value={t.folhas2} onChange={e => updateTecido(t.id, { folhas2: Number(e.target.value) })} /></td>
+                      <td className="p-1">
+                        <button type="button" onClick={() => removeTecido(t.id)} className="text-slate-400 hover:text-red-500 p-1"><X size={12} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                  {form.tecidosCorte.length === 0 && (
+                    <tr><td colSpan={9} className="p-4 text-center text-slate-400">Nenhum tecido adicionado</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ── Tab: Aviamentos ──────────────────────────────── */}
+        {formTab === 'aviamentos' && (
+          <div className="space-y-3">
+            {/* Sub-section switcher */}
+            <div className="flex gap-1 flex-wrap">
+              {(['aviamentos', 'acabamento', 'cliente', 'travetes'] as AviSecao[]).map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setAviSecao(s)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    aviSecao === s ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {SECAO_LABELS[s]}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-700">{SECAO_LABELS[aviSecao]}</h3>
+              <button type="button" onClick={addAviamento} className="text-xs text-blue-600 flex items-center gap-1 hover:underline">
+                <Plus size={12} /> Adicionar aviamento
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border border-slate-200 rounded-lg overflow-hidden">
+                <thead className="bg-slate-50">
+                  <tr>
+                    {['Descrição', 'Qtd/Unid', 'Variante', 'Total', 'Enviada', 'Responsável', ''].map(h => (
+                      <th key={h} className="p-2 text-left text-slate-500 font-medium whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {aviamentosSecao.map(a => (
+                    <tr key={a.id} className="border-t border-slate-100">
+                      <td className="p-1"><input className="input text-xs w-32" value={a.descricao} onChange={e => updateAviamento(a.id, { descricao: e.target.value })} /></td>
+                      <td className="p-1"><input type="number" className="input text-xs w-16" value={a.unidade} onChange={e => updateAviamento(a.id, { unidade: Number(e.target.value) })} /></td>
+                      <td className="p-1"><input className="input text-xs w-24" value={a.variante} onChange={e => updateAviamento(a.id, { variante: e.target.value })} /></td>
+                      <td className="p-1"><input type="number" className="input text-xs w-16" value={a.total} onChange={e => updateAviamento(a.id, { total: Number(e.target.value) })} /></td>
+                      <td className="p-1"><input type="number" className="input text-xs w-16" value={a.enviada} onChange={e => updateAviamento(a.id, { enviada: Number(e.target.value) })} /></td>
+                      <td className="p-1"><input className="input text-xs w-24" value={a.responsavel} onChange={e => updateAviamento(a.id, { responsavel: e.target.value })} /></td>
+                      <td className="p-1">
+                        <button type="button" onClick={() => removeAviamento(a.id)} className="text-slate-400 hover:text-red-500 p-1"><X size={12} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                  {aviamentosSecao.length === 0 && (
+                    <tr><td colSpan={7} className="p-4 text-center text-slate-400">Nenhum item nesta seção</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ── Tab: Moldes ──────────────────────────────────── */}
+        {formTab === 'moldes' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-700">Ficha Modelagem — Moldes</h3>
+              <button type="button" onClick={addMolde} className="text-xs text-blue-600 flex items-center gap-1 hover:underline">
+                <Plus size={12} /> Adicionar molde
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border border-slate-200 rounded-lg overflow-hidden">
+                <thead className="bg-slate-50">
+                  <tr>
+                    {['Nº', 'Descrição', 'Qtd', 'Cor', ''].map(h => (
+                      <th key={h} className="p-2 text-left text-slate-500 font-medium">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {form.moldes.map(m => (
+                    <tr key={m.id} className="border-t border-slate-100">
+                      <td className="p-1"><input className="input text-xs w-14" value={m.numero} onChange={e => updateMolde(m.id, { numero: e.target.value })} /></td>
+                      <td className="p-1"><input className="input text-xs w-48" value={m.descricao} onChange={e => updateMolde(m.id, { descricao: e.target.value })} /></td>
+                      <td className="p-1"><input className="input text-xs w-16" value={m.quantidade} onChange={e => updateMolde(m.id, { quantidade: e.target.value })} /></td>
+                      <td className="p-1"><input className="input text-xs w-20" value={m.cor} onChange={e => updateMolde(m.id, { cor: e.target.value })} /></td>
+                      <td className="p-1">
+                        <button type="button" onClick={() => removeMolde(m.id)} className="text-slate-400 hover:text-red-500 p-1"><X size={12} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                  {form.moldes.length === 0 && (
+                    <tr><td colSpan={5} className="p-4 text-center text-slate-400">Nenhum molde adicionado</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ── Tab: Check List ──────────────────────────────── */}
+        {formTab === 'checklist' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-700">Check List pré-envio</h3>
+              <button type="button" onClick={addCheckItem} className="text-xs text-blue-600 flex items-center gap-1 hover:underline">
+                <Plus size={12} /> Adicionar item
+              </button>
+            </div>
+            <div className="space-y-2">
+              {form.checkList.map(c => (
+                <div key={c.id} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
+                  <input className="input text-xs flex-1" placeholder="Descrição" value={c.descricao} onChange={e => updateCheckItem(c.id, { descricao: e.target.value })} />
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => updateCheckItem(c.id, { ok: c.ok === true ? null : true })}
+                      className={`px-2 py-1 rounded text-xs font-medium ${c.ok === true ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-500'}`}
+                    >OK</button>
+                    <button
+                      type="button"
+                      onClick={() => updateCheckItem(c.id, { ok: c.ok === false ? null : false })}
+                      className={`px-2 py-1 rounded text-xs font-medium ${c.ok === false ? 'bg-red-500 text-white' : 'bg-slate-200 text-slate-500'}`}
+                    >NOK</button>
+                  </div>
+                  <input className="input text-xs w-28" placeholder="Responsável" value={c.responsavel} onChange={e => updateCheckItem(c.id, { responsavel: e.target.value })} />
+                  <input className="input text-xs w-32" placeholder="Obs." value={c.obs} onChange={e => updateCheckItem(c.id, { obs: e.target.value })} />
+                  <button type="button" onClick={() => removeCheckItem(c.id)} className="text-slate-400 hover:text-red-500"><X size={12} /></button>
+                </div>
+              ))}
+              {form.checkList.length === 0 && (
+                <p className="text-xs text-slate-400 text-center py-4">Nenhum item no check list</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Tab: Romaneio ────────────────────────────────── */}
+        {formTab === 'romaneio' && (
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-slate-700">Romaneio de Produção</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Oficina</label>
+                <input className="input text-sm" value={form.romaneio.oficina} onChange={e => setForm(f => ({ ...f, romaneio: { ...f.romaneio, oficina: e.target.value } }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Telefone</label>
+                <input className="input text-sm" value={form.romaneio.telefone} onChange={e => setForm(f => ({ ...f, romaneio: { ...f.romaneio, telefone: e.target.value } }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Data Envio Produção</label>
+                <input type="date" className="input text-sm" value={form.romaneio.dataEnvio} onChange={e => setForm(f => ({ ...f, romaneio: { ...f.romaneio, dataEnvio: e.target.value } }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Data Retirada Produção</label>
+                <input type="date" className="input text-sm" value={form.romaneio.dataRetirada} onChange={e => setForm(f => ({ ...f, romaneio: { ...f.romaneio, dataRetirada: e.target.value } }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Quantidade Enviada</label>
+                <input type="number" className="input text-sm" value={form.romaneio.qtdEnviada} onChange={e => setForm(f => ({ ...f, romaneio: { ...f.romaneio, qtdEnviada: Number(e.target.value) } }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Descontos (R$)</label>
+                <input type="number" step="0.01" className="input text-sm" value={form.romaneio.desconto} onChange={e => setForm(f => ({ ...f, romaneio: { ...f.romaneio, desconto: Number(e.target.value) } }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Total Ficha (R$)</label>
+                <input type="number" step="0.01" className="input text-sm" value={form.romaneio.totalFicha} onChange={e => setForm(f => ({ ...f, romaneio: { ...f.romaneio, totalFicha: Number(e.target.value) } }))} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Observações</label>
+              <textarea rows={3} className="input text-sm" value={form.romaneio.observacoes} onChange={e => setForm(f => ({ ...f, romaneio: { ...f.romaneio, observacoes: e.target.value } }))} />
+            </div>
+          </div>
+        )}
+
+        {/* ── Tab: Relatório ───────────────────────────────── */}
+        {formTab === 'relatorio' && (
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-slate-700">Relatório de Produção</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Oficina</label>
+                <input className="input text-sm" value={form.relatorio.oficina} onChange={e => setForm(f => ({ ...f, relatorio: { ...f.relatorio, oficina: e.target.value } }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Prazo Entrega</label>
+                <input type="date" className="input text-sm" value={form.relatorio.prazoEntrega} onChange={e => setForm(f => ({ ...f, relatorio: { ...f.relatorio, prazoEntrega: e.target.value } }))} />
+              </div>
+            </div>
+
+            {/* Corte Tecidos */}
+            <div className="border border-slate-200 rounded-lg p-3 space-y-2">
+              <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Corte Tecidos</h4>
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Faltas</label>
+                  <select className="input text-xs" value={form.relatorio.corteTecidosOk === null ? '' : String(form.relatorio.corteTecidosOk)} onChange={e => setForm(f => ({ ...f, relatorio: { ...f.relatorio, corteTecidosOk: e.target.value === '' ? null : e.target.value === 'true' } }))}>
+                    <option value="">N/A</option>
+                    <option value="true">OK</option>
+                    <option value="false">NOK</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Retalhos</label>
+                  <select className="input text-xs" value={form.relatorio.retalhosTecidosOk === null ? '' : String(form.relatorio.retalhosTecidosOk)} onChange={e => setForm(f => ({ ...f, relatorio: { ...f.relatorio, retalhosTecidosOk: e.target.value === '' ? null : e.target.value === 'true' } }))}>
+                    <option value="">N/A</option>
+                    <option value="true">OK</option>
+                    <option value="false">NOK</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Nota Qualidade (0-10)</label>
+                  <input type="number" min="0" max="10" className="input text-xs" value={form.relatorio.notaQualidade} onChange={e => setForm(f => ({ ...f, relatorio: { ...f.relatorio, notaQualidade: Number(e.target.value) } }))} />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Nota Organização (0-10)</label>
+                  <input type="number" min="0" max="10" className="input text-xs" value={form.relatorio.notaOrganizacao} onChange={e => setForm(f => ({ ...f, relatorio: { ...f.relatorio, notaOrganizacao: Number(e.target.value) } }))} />
+                </div>
+              </div>
+            </div>
+
+            {/* Corte Aviamentos */}
+            <div className="border border-slate-200 rounded-lg p-3 space-y-2">
+              <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Corte Aviamentos</h4>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Faltas</label>
+                  <select className="input text-xs" value={form.relatorio.corteAviamentosOk === null ? '' : String(form.relatorio.corteAviamentosOk)} onChange={e => setForm(f => ({ ...f, relatorio: { ...f.relatorio, corteAviamentosOk: e.target.value === '' ? null : e.target.value === 'true' } }))}>
+                    <option value="">N/A</option>
+                    <option value="true">OK</option>
+                    <option value="false">NOK</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Retalhos</label>
+                  <select className="input text-xs" value={form.relatorio.retalhosAviamentosOk === null ? '' : String(form.relatorio.retalhosAviamentosOk)} onChange={e => setForm(f => ({ ...f, relatorio: { ...f.relatorio, retalhosAviamentosOk: e.target.value === '' ? null : e.target.value === 'true' } }))}>
+                    <option value="">N/A</option>
+                    <option value="true">OK</option>
+                    <option value="false">NOK</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Relatório LS */}
+            <div className="border border-slate-200 rounded-lg p-3 space-y-2">
+              <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Relatório LS — Produção</h4>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Dias Atraso</label>
+                  <input type="number" min="0" className="input text-xs" value={form.relatorio.diasAtraso} onChange={e => setForm(f => ({ ...f, relatorio: { ...f.relatorio, diasAtraso: Number(e.target.value) } }))} />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Qtd Defeitos</label>
+                  <input type="number" min="0" className="input text-xs" value={form.relatorio.qtdDefeitos} onChange={e => setForm(f => ({ ...f, relatorio: { ...f.relatorio, qtdDefeitos: Number(e.target.value) } }))} />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Observações</label>
+              <textarea rows={3} className="input text-sm" value={form.relatorio.observacoes} onChange={e => setForm(f => ({ ...f, relatorio: { ...f.relatorio, observacoes: e.target.value } }))} />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ─── VIEW TAB BAR ────────────────────────────────────────────────────────────
+  const ViewTabBar = () => {
+    const tabs: [ViewTab, string][] = [
+      ['cabecalho', 'Cabeçalho'],
+      ['tecidos', 'Tecidos'],
+      ['aviamentos', 'Aviamentos'],
+      ['moldes', 'Moldes'],
+      ['checklist', 'Check List'],
+      ['romaneio', 'Romaneio'],
+      ['relatorio', 'Relatório'],
+    ];
+    return (
+      <div className="flex gap-1 flex-wrap">
+        {tabs.map(([tab, lbl]) => (
+          <button
+            key={tab}
+            onClick={() => setViewTab(tab)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              viewTab === tab ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            {lbl}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  // ─── RENDER ──────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -293,7 +822,7 @@ export default function FichasTecnicas() {
           >
             <Upload size={16} /> Importar Excel
           </button>
-          <button onClick={() => { setForm(emptyForm()); setModalAdd(true); }} className="btn-primary">
+          <button onClick={() => { setForm(emptyForm()); setFormTab('cabecalho'); setModalAdd(true); }} className="btn-primary">
             <Plus size={16} /> Nova Ficha
           </button>
         </div>
@@ -304,11 +833,11 @@ export default function FichasTecnicas() {
         <input placeholder="Buscar por modelo..." className="input pl-9" value={search} onChange={e => setSearch(e.target.value)} />
       </div>
 
+      {/* ── Cards list ────────────────────────────────────── */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {filtered.map(({ modelo, ...ficha }) => {
           if (!modelo) return null;
-          const custo = calcCustoTotal(ficha);
-          const preco = calcPrecoVenda(ficha);
+          const cab = ficha.cabecalho;
           return (
             <div key={ficha.id} className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between mb-3">
@@ -322,10 +851,15 @@ export default function FichasTecnicas() {
                 />
               </div>
               <div className="space-y-1 text-sm mb-3">
+                {cab?.cliente && (
+                  <div className="flex justify-between text-slate-500"><span>Cliente:</span><span className="truncate max-w-[150px]">{cab.cliente}</span></div>
+                )}
+                {cab?.quantidadeFicha != null && cab.quantidadeFicha > 0 && (
+                  <div className="flex justify-between text-slate-500"><span>Qtd Ficha:</span><span>{cab.quantidadeFicha}</span></div>
+                )}
                 <div className="flex justify-between text-slate-500"><span>Materiais:</span><span>{ficha.itens.length} itens</span></div>
-                <div className="flex justify-between text-slate-500"><span>Custo total:</span><strong className="text-slate-700">R$ {custo.toFixed(2)}</strong></div>
-                <div className="flex justify-between text-slate-500"><span>Preço sugerido:</span><strong className="text-green-600">R$ {preco.toFixed(2)}</strong></div>
-                <div className="flex justify-between text-slate-500"><span>Tempo:</span><span>{ficha.tempoProdução} min</span></div>
+                <div className="flex justify-between text-slate-500"><span>Moldes:</span><span>{ficha.moldes.length}</span></div>
+                <div className="flex justify-between text-slate-500"><span>Tecidos:</span><span>{(ficha.tecidosCorte ?? []).length}</span></div>
               </div>
               <div className="flex gap-1 pt-3 border-t border-slate-50">
                 <button onClick={() => openView(ficha)} className="flex-1 text-xs text-blue-600 hover:underline">Ver ficha</button>
@@ -351,7 +885,7 @@ export default function FichasTecnicas() {
         )}
       </div>
 
-      {/* ── MODAL IMPORTAR ────────────────────────────────────── */}
+      {/* ── MODAL IMPORTAR ─────────────────────────────────── */}
       {modalImport && (
         <Modal title="Importar Ficha Técnica do Excel" onClose={() => { setModalImport(false); resetImport(); }} size="xl">
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileSelect} />
@@ -407,7 +941,6 @@ export default function FichasTecnicas() {
 
           {importStatus === 'preview' && importPreview && (
             <div className="space-y-5">
-              {/* Header info */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-slate-50 rounded-lg p-3">
                   <p className="text-xs text-slate-400">Modelo detectado</p>
@@ -423,7 +956,6 @@ export default function FichasTecnicas() {
                 </div>
               </div>
 
-              {/* Resumo */}
               <div className="flex gap-3">
                 <div className="flex-1 bg-green-50 border border-green-200 rounded-lg p-3 text-center">
                   <p className="text-2xl font-bold text-green-600">{importPreview.processed.insumosResolvidos.filter(r => !r.isNovo).length}</p>
@@ -439,7 +971,6 @@ export default function FichasTecnicas() {
                 </div>
               </div>
 
-              {/* Lista de materiais */}
               <div>
                 <h3 className="text-sm font-semibold text-slate-700 mb-2">Materiais da ficha:</h3>
                 <div className="max-h-64 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
@@ -477,16 +1008,24 @@ export default function FichasTecnicas() {
         </Modal>
       )}
 
+      {/* ── MODAL NOVA FICHA ───────────────────────────────── */}
       {modalAdd && (
         <Modal title="Nova Ficha Técnica" onClose={() => setModalAdd(false)} size="xl">
           <FichaForm />
           <div className="flex justify-end gap-2 mt-5">
             <button onClick={() => setModalAdd(false)} className="btn-ghost">Cancelar</button>
-            <button onClick={handleAdd} className="btn-primary" disabled={!form.modeloId}>Salvar</button>
+            <button
+              onClick={handleAdd}
+              className="btn-primary"
+              disabled={!form.modeloId && (!form.criarNovoModelo || !form.novoModeloNome || !form.novoModeloCodigo)}
+            >
+              Salvar
+            </button>
           </div>
         </Modal>
       )}
 
+      {/* ── MODAL EDITAR ───────────────────────────────────── */}
       {modalEdit && (
         <Modal title="Editar Ficha Técnica" onClose={() => setModalEdit(null)} size="xl">
           <FichaForm />
@@ -497,195 +1036,287 @@ export default function FichasTecnicas() {
         </Modal>
       )}
 
-      {modalView && (
-        <Modal title={`Ficha Técnica — ${modelos.find(m => m.id === modalView.modeloId)?.nome}`} onClose={() => setModalView(null)} size="xl">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              {/* Tab bar */}
-              <div className="flex gap-1 flex-wrap">
-                {([
-                  ['materiais', 'Materiais'],
-                  ['corte', 'Ficha Corte'],
-                  ['aviamentos', 'Aviamentos'],
-                  ['checklist', 'Check List'],
-                  ['romaneio', 'Romaneio'],
-                  ['relatorio', 'Relatório'],
-                ] as [ViewTab, string][]).map(([tab, lbl]) => (
-                  <button
-                    key={tab}
-                    onClick={() => setViewTab(tab)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      viewTab === tab
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {lbl}
-                  </button>
-                ))}
+      {/* ── MODAL VIEW ─────────────────────────────────────── */}
+      {modalView && (() => {
+        const cab = modalView.cabecalho ?? {} as FichaCabecalho;
+        const valorTotal = (cab.custoConfeccaoUnid ?? 0) * (cab.quantidadeFicha ?? 0);
+        return (
+          <Modal title={`Ficha Técnica — ${modelos.find(m => m.id === modalView.modeloId)?.nome}`} onClose={() => setModalView(null)} size="xl">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <ViewTabBar />
+                <button
+                  onClick={() => handleExport(modalView)}
+                  className="flex items-center gap-1.5 text-sm text-green-600 border border-green-200 px-3 py-1.5 rounded-lg hover:bg-green-50"
+                >
+                  <Download size={14} /> Exportar Excel
+                </button>
               </div>
-              <button
-                onClick={() => handleExport(modalView)}
-                className="flex items-center gap-1.5 text-sm text-green-600 border border-green-200 px-3 py-1.5 rounded-lg hover:bg-green-50"
-              >
-                <Download size={14} /> Exportar Excel
-              </button>
+
+              {/* View: Cabeçalho */}
+              {viewTab === 'cabecalho' && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-3 text-sm">
+                    {[
+                      ['Cliente', cab.cliente],
+                      ['Representante', cab.representante],
+                      ['Pedido', cab.pedido],
+                      ['Ref. Cliente', cab.refCliente],
+                      ['Ref. Matriz', cab.refMatriz],
+                      ['Coleção', cab.colecao],
+                      ['QTD Mostruário LS', String(cab.qtdMostruario ?? 0)],
+                      ['Custo Confecção (R$/unid)', `R$ ${(cab.custoConfeccaoUnid ?? 0).toFixed(2)}`],
+                      ['Quantidade Ficha', String(cab.quantidadeFicha ?? 0)],
+                    ].map(([label, value]) => (
+                      <div key={label} className="bg-slate-50 rounded-lg p-3">
+                        <p className="text-xs text-slate-400">{label}</p>
+                        <p className="font-medium text-slate-700">{value || '—'}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 flex justify-between">
+                    <span className="text-sm text-blue-700 font-medium">Valor Total:</span>
+                    <strong className="text-blue-800">R$ {valorTotal.toFixed(2)}</strong>
+                  </div>
+                  <div className="grid grid-cols-4 gap-3 text-sm">
+                    {[
+                      ['Data Pedido', cab.dataPedido],
+                      ['Data Entrega', cab.dataEntrega],
+                      ['Início Produção', cab.inicioProducao],
+                      ['Término Produção', cab.terminoProducao],
+                    ].map(([label, value]) => (
+                      <div key={label} className="bg-slate-50 rounded-lg p-3">
+                        <p className="text-xs text-slate-400">{label}</p>
+                        <p className="font-medium text-slate-700">{value || '—'}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-sm">
+                    {[
+                      ['Oficina', cab.oficina],
+                      ['Telefone', cab.telefone],
+                      ['Cortador', cab.cortador],
+                      ['Qtd Moldes', String(cab.qtdMoldesTotal ?? 0)],
+                      ['Qtd Gabaritos', String(cab.qtdGabaritos ?? 0)],
+                    ].map(([label, value]) => (
+                      <div key={label} className="bg-slate-50 rounded-lg p-3">
+                        <p className="text-xs text-slate-400">{label}</p>
+                        <p className="font-medium text-slate-700">{value || '—'}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* View: Tecidos */}
+              {viewTab === 'tecidos' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border border-slate-200 rounded-lg overflow-hidden">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        {['Descrição', 'Unidade', 'Variante 1', 'Total 1', 'Folhas 1', 'Variante 2', 'Total 2', 'Folhas 2'].map(h => (
+                          <th key={h} className="p-2 text-left text-slate-500 font-medium whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(modalView.tecidosCorte ?? []).map(t => (
+                        <tr key={t.id} className="border-t border-slate-100">
+                          <td className="p-2">{t.descricao || '—'}</td>
+                          <td className="p-2">{t.unidade || '—'}</td>
+                          <td className="p-2">{t.variante1 || '—'}</td>
+                          <td className="p-2">{t.total1}</td>
+                          <td className="p-2">{t.folhas1}</td>
+                          <td className="p-2">{t.variante2 || '—'}</td>
+                          <td className="p-2">{t.total2}</td>
+                          <td className="p-2">{t.folhas2}</td>
+                        </tr>
+                      ))}
+                      {(modalView.tecidosCorte ?? []).length === 0 && (
+                        <tr><td colSpan={8} className="p-4 text-center text-slate-400">Nenhum tecido cadastrado</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* View: Aviamentos */}
+              {viewTab === 'aviamentos' && (
+                <div className="space-y-3">
+                  {(['aviamentos', 'acabamento', 'cliente', 'travetes'] as AviSecao[]).map(secao => {
+                    const items = (modalView.aviamentosFicha ?? []).filter(a => a.secao === secao);
+                    return (
+                      <div key={secao} className="border border-slate-200 rounded-lg overflow-hidden">
+                        <div className="bg-purple-50 px-4 py-2 text-xs font-semibold text-purple-700 uppercase tracking-wide">{SECAO_LABELS[secao]}</div>
+                        <table className="w-full text-xs">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              {['Descrição', 'Qtd/Unid', 'Variante', 'Total', 'Enviada', 'Responsável'].map(h => (
+                                <th key={h} className="p-2 text-left text-slate-500 font-medium">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {items.map(a => (
+                              <tr key={a.id} className="border-t border-slate-50">
+                                <td className="p-2">{a.descricao || '—'}</td>
+                                <td className="p-2">{a.unidade}</td>
+                                <td className="p-2">{a.variante || '—'}</td>
+                                <td className="p-2">{a.total}</td>
+                                <td className="p-2">{a.enviada}</td>
+                                <td className="p-2">{a.responsavel || '—'}</td>
+                              </tr>
+                            ))}
+                            {items.length === 0 && (
+                              <tr><td colSpan={6} className="p-4 text-center text-slate-400">Nenhum item nesta seção</td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* View: Moldes */}
+              {viewTab === 'moldes' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        {['Nº', 'Descrição', 'Qtd', 'Cor'].map(h => (
+                          <th key={h} className="p-2 text-left text-slate-500 font-medium">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {modalView.moldes.map(m => (
+                        <tr key={m.id} className="border-t border-slate-100">
+                          <td className="p-2">{m.numero}</td>
+                          <td className="p-2">{m.descricao || '—'}</td>
+                          <td className="p-2">{m.quantidade}</td>
+                          <td className="p-2">{m.cor || '—'}</td>
+                        </tr>
+                      ))}
+                      {modalView.moldes.length === 0 && (
+                        <tr><td colSpan={4} className="p-4 text-center text-slate-400">Nenhum molde cadastrado</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* View: Check List */}
+              {viewTab === 'checklist' && (
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-400">Clique para marcar cada item do check list</p>
+                  {modalView.checkList.length === 0 && (
+                    <p className="text-center py-6 text-slate-400 text-sm">Nenhum item no check list</p>
+                  )}
+                  {modalView.checkList.map(item => (
+                    <div key={item.id} className="flex items-center gap-3 bg-slate-50 rounded-lg p-3">
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => toggleCheckItem(item.id, item.ok === true ? null : true)}
+                          className={`px-2 py-1 rounded text-xs font-medium transition-colors ${item.ok === true ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-500 hover:bg-green-100'}`}
+                        >OK</button>
+                        <button
+                          onClick={() => toggleCheckItem(item.id, item.ok === false ? null : false)}
+                          className={`px-2 py-1 rounded text-xs font-medium transition-colors ${item.ok === false ? 'bg-red-500 text-white' : 'bg-slate-200 text-slate-500 hover:bg-red-100'}`}
+                        >NOK</button>
+                      </div>
+                      <div className="flex-1">
+                        <p className={`text-sm font-medium ${item.ok === true ? 'text-green-700' : item.ok === false ? 'text-red-700' : 'text-slate-700'}`}>
+                          {item.descricao}
+                        </p>
+                        {item.obs && <p className="text-xs text-slate-400">{item.obs}</p>}
+                      </div>
+                      {item.responsavel && <span className="text-xs text-slate-400">{item.responsavel}</span>}
+                    </div>
+                  ))}
+                  <div className="flex gap-4 text-xs pt-1">
+                    <span className="text-green-600 font-medium">✓ {modalView.checkList.filter(c => c.ok === true).length} OK</span>
+                    <span className="text-red-500 font-medium">✗ {modalView.checkList.filter(c => c.ok === false).length} NOK</span>
+                    <span className="text-slate-400">{modalView.checkList.filter(c => c.ok === null).length} pendentes</span>
+                  </div>
+                </div>
+              )}
+
+              {/* View: Romaneio */}
+              {viewTab === 'romaneio' && (
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-slate-700">Romaneio de Produção</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {[
+                      ['Oficina', modalView.romaneio.oficina],
+                      ['Telefone', modalView.romaneio.telefone],
+                      ['Data Envio', modalView.romaneio.dataEnvio],
+                      ['Data Retirada', modalView.romaneio.dataRetirada],
+                      ['Qtd Enviada', String(modalView.romaneio.qtdEnviada)],
+                      ['Desconto (R$)', `R$ ${modalView.romaneio.desconto.toFixed(2)}`],
+                      ['Total Ficha (R$)', `R$ ${modalView.romaneio.totalFicha.toFixed(2)}`],
+                    ].map(([label, value]) => (
+                      <div key={label} className="bg-slate-50 rounded-lg p-3">
+                        <p className="text-xs text-slate-400">{label}</p>
+                        <p className="font-medium text-slate-700">{value || '—'}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {modalView.romaneio.observacoes && (
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <p className="text-xs text-slate-400 mb-1">Observações</p>
+                      <p className="text-sm text-slate-700">{modalView.romaneio.observacoes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* View: Relatório */}
+              {viewTab === 'relatorio' && (
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-slate-700">Relatório de Produção</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {[
+                      ['Oficina', modalView.relatorio.oficina],
+                      ['Prazo Entrega', modalView.relatorio.prazoEntrega],
+                      ['Nota Qualidade', String(modalView.relatorio.notaQualidade)],
+                      ['Nota Organização', String(modalView.relatorio.notaOrganizacao)],
+                      ['Dias Atraso', String(modalView.relatorio.diasAtraso)],
+                      ['Qtd Defeitos', String(modalView.relatorio.qtdDefeitos)],
+                    ].map(([label, value]) => (
+                      <div key={label} className="bg-slate-50 rounded-lg p-3">
+                        <p className="text-xs text-slate-400">{label}</p>
+                        <p className="font-medium text-slate-700">{value || '—'}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    {[
+                      ['Corte Tecidos (Faltas)', modalView.relatorio.corteTecidosOk],
+                      ['Corte Aviamentos (Faltas)', modalView.relatorio.corteAviamentosOk],
+                      ['Retalhos Tecidos', modalView.relatorio.retalhosTecidosOk],
+                      ['Retalhos Aviamentos', modalView.relatorio.retalhosAviamentosOk],
+                    ].map(([label, val]) => (
+                      <div key={String(label)} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                        <span className="text-slate-600 text-xs">{label}</span>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${val === true ? 'bg-green-100 text-green-700' : val === false ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-500'}`}>
+                          {val === true ? 'OK' : val === false ? 'NOK' : 'N/A'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {modalView.relatorio.observacoes && (
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <p className="text-xs text-slate-400 mb-1">Observações</p>
+                      <p className="text-sm text-slate-700">{modalView.relatorio.observacoes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-
-            {/* Tab: Materiais (todos) */}
-            {viewTab === 'materiais' && (
-              <div className="space-y-3">
-                <div className="border border-slate-100 rounded-lg overflow-hidden">
-                  <ItensTable itens={modalView.itens} />
-                </div>
-                <div className="bg-slate-50 rounded-lg p-4 space-y-1 text-sm">
-                  <div className="flex justify-between"><span>Custo materiais:</span><strong>R$ {calcCustoMateriais(modalView.itens).toFixed(2)}</strong></div>
-                  <div className="flex justify-between"><span>Mão de obra:</span><strong>R$ {modalView.custoMaoDeObra.toFixed(2)}</strong></div>
-                  <div className="flex justify-between"><span>Outros:</span><strong>R$ {modalView.outrosCustos.toFixed(2)}</strong></div>
-                  <div className="flex justify-between text-base font-bold border-t border-slate-200 pt-2 mt-2">
-                    <span>Custo total:</span><span>R$ {calcCustoTotal(modalView).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-green-600">
-                    <span>Preço sugerido ({modalView.margemLucro}% margem):</span>
-                    <strong>R$ {calcPrecoVenda(modalView).toFixed(2)}</strong>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Tab: Ficha Corte */}
-            {viewTab === 'corte' && (
-              <div className="border border-slate-100 rounded-lg overflow-hidden">
-                <div className="bg-blue-50 px-4 py-2 text-xs font-semibold text-blue-700 uppercase tracking-wide">Ficha Técnica de Corte</div>
-                <ItensTable itens={modalView.itens.filter(i => i.secao === 'corte' || !i.secao)} />
-              </div>
-            )}
-
-            {/* Tab: Aviamentos */}
-            {viewTab === 'aviamentos' && (
-              <div className="space-y-3">
-                {(['aviamentos', 'acabamento', 'cliente', 'travetes'] as SecaoFicha[]).map(secao => {
-                  const itensSecao = modalView.itens.filter(i => i.secao === secao);
-                  return (
-                    <div key={secao} className="border border-slate-100 rounded-lg overflow-hidden">
-                      <div className="bg-purple-50 px-4 py-2 text-xs font-semibold text-purple-700 uppercase tracking-wide">{SECAO_LABELS[secao]}</div>
-                      <ItensTable itens={itensSecao} />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Tab: Check List */}
-            {viewTab === 'checklist' && (
-              <div className="space-y-2">
-                <p className="text-xs text-slate-400">Clique para marcar cada item do check list</p>
-                {modalView.checkList.length === 0 && (
-                  <p className="text-center py-6 text-slate-400 text-sm">Nenhum item no check list</p>
-                )}
-                {modalView.checkList.map(item => (
-                  <div key={item.id} className="flex items-center gap-3 bg-slate-50 rounded-lg p-3">
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => toggleCheckItem(item.id, item.ok === true ? null : true)}
-                        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${item.ok === true ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-500 hover:bg-green-100'}`}
-                      >OK</button>
-                      <button
-                        onClick={() => toggleCheckItem(item.id, item.ok === false ? null : false)}
-                        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${item.ok === false ? 'bg-red-500 text-white' : 'bg-slate-200 text-slate-500 hover:bg-red-100'}`}
-                      >NOK</button>
-                    </div>
-                    <div className="flex-1">
-                      <p className={`text-sm font-medium ${item.ok === true ? 'text-green-700' : item.ok === false ? 'text-red-700' : 'text-slate-700'}`}>
-                        {item.descricao}
-                      </p>
-                      {item.obs && <p className="text-xs text-slate-400">{item.obs}</p>}
-                    </div>
-                    {item.responsavel && <span className="text-xs text-slate-400">{item.responsavel}</span>}
-                  </div>
-                ))}
-                <div className="flex gap-4 text-xs pt-1">
-                  <span className="text-green-600 font-medium">✓ {modalView.checkList.filter(c => c.ok === true).length} OK</span>
-                  <span className="text-red-500 font-medium">✗ {modalView.checkList.filter(c => c.ok === false).length} NOK</span>
-                  <span className="text-slate-400">{modalView.checkList.filter(c => c.ok === null).length} pendentes</span>
-                </div>
-              </div>
-            )}
-
-            {/* Tab: Romaneio */}
-            {viewTab === 'romaneio' && (
-              <div className="space-y-3">
-                <h3 className="font-semibold text-slate-700">Romaneio de Produção</h3>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  {[
-                    ['Oficina', modalView.romaneio.oficina],
-                    ['Telefone', modalView.romaneio.telefone],
-                    ['Data Envio', modalView.romaneio.dataEnvio],
-                    ['Data Retirada', modalView.romaneio.dataRetirada],
-                    ['Qtd Enviada', String(modalView.romaneio.qtdEnviada)],
-                    ['Desconto (R$)', `R$ ${modalView.romaneio.desconto.toFixed(2)}`],
-                    ['Total Ficha (R$)', `R$ ${modalView.romaneio.totalFicha.toFixed(2)}`],
-                  ].map(([label, value]) => (
-                    <div key={label} className="bg-slate-50 rounded-lg p-3">
-                      <p className="text-xs text-slate-400">{label}</p>
-                      <p className="font-medium text-slate-700">{value || '—'}</p>
-                    </div>
-                  ))}
-                </div>
-                {modalView.romaneio.observacoes && (
-                  <div className="bg-slate-50 rounded-lg p-3">
-                    <p className="text-xs text-slate-400 mb-1">Observações</p>
-                    <p className="text-sm text-slate-700">{modalView.romaneio.observacoes}</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Tab: Relatório */}
-            {viewTab === 'relatorio' && (
-              <div className="space-y-3">
-                <h3 className="font-semibold text-slate-700">Relatório de Produção</h3>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  {[
-                    ['Oficina', modalView.relatorio.oficina],
-                    ['Prazo Entrega', modalView.relatorio.prazoEntrega],
-                    ['Nota Qualidade', String(modalView.relatorio.notaQualidade)],
-                    ['Nota Organização', String(modalView.relatorio.notaOrganizacao)],
-                    ['Dias Atraso', String(modalView.relatorio.diasAtraso)],
-                    ['Qtd Defeitos', String(modalView.relatorio.qtdDefeitos)],
-                  ].map(([label, value]) => (
-                    <div key={label} className="bg-slate-50 rounded-lg p-3">
-                      <p className="text-xs text-slate-400">{label}</p>
-                      <p className="font-medium text-slate-700">{value || '—'}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  {[
-                    ['Corte Tecidos', modalView.relatorio.corteTecidosOk],
-                    ['Corte Aviamentos', modalView.relatorio.corteAviamentosOk],
-                    ['Retalhos Tecidos', modalView.relatorio.retalhosTecidosOk],
-                    ['Retalhos Aviamentos', modalView.relatorio.retalhosAviamentosOk],
-                  ].map(([label, val]) => (
-                    <div key={String(label)} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
-                      <span className="text-slate-600 text-xs">{label}</span>
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${val === true ? 'bg-green-100 text-green-700' : val === false ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-500'}`}>
-                        {val === true ? 'OK' : val === false ? 'NOK' : 'N/A'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                {modalView.relatorio.observacoes && (
-                  <div className="bg-slate-50 rounded-lg p-3">
-                    <p className="text-xs text-slate-400 mb-1">Observações</p>
-                    <p className="text-sm text-slate-700">{modalView.relatorio.observacoes}</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </Modal>
-      )}
+          </Modal>
+        );
+      })()}
     </div>
   );
 }

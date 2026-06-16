@@ -251,6 +251,14 @@ export function processarImport(
     checkList: [],
     romaneio: { oficina: '', telefone: '', dataEnvio: '', dataRetirada: '', qtdEnviada: 0, desconto: 0, totalFicha: 0, observacoes: '' },
     relatorio: { oficina: '', prazoEntrega: '', corteTecidosOk: null, corteAviamentosOk: null, retalhosTecidosOk: null, retalhosAviamentosOk: null, notaQualidade: 0, notaOrganizacao: 0, diasAtraso: 0, qtdDefeitos: 0, observacoes: '' },
+    cabecalho: {
+      cliente: parsed.cliente, representante: '', pedido: '', refCliente: parsed.referencia, refMatriz: '',
+      colecao: '', qtdMostruario: 0, custoConfeccaoUnid: 0, quantidadeFicha: parsed.qtdFicha,
+      dataPedido: '', dataEntrega: '', inicioProducao: '', terminoProducao: '',
+      oficina: '', telefone: '', cortador: '', qtdMoldesTotal: 0, qtdGabaritos: 0,
+    },
+    tecidosCorte: [],
+    aviamentosFicha: [],
   };
 
   return { modeloNovo, fichaNova, insumosParaCriar, insumosResolvidos };

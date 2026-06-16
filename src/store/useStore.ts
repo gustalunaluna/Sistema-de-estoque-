@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
   Insumo, MovimentacaoInsumo, Modelo, FichaTecnica, OrdemProducao,
   Cliente, Fornecedor, Compra, Orcamento, Usuario, HistoricoAlteracao,
-  StatusProducao, CheckListItem, ConfiguracaoApp
+  StatusProducao, CheckListItem, ConfiguracaoApp, FichaCabecalho
 } from '../types';
 import { appStorage } from '../lib/storage';
 import { v4 as uuidv4 } from 'uuid';
@@ -29,6 +29,13 @@ const DEFAULT_RELATORIO = () => ({
   oficina: '', prazoEntrega: '', corteTecidosOk: null, corteAviamentosOk: null,
   retalhosTecidosOk: null, retalhosAviamentosOk: null,
   notaQualidade: 0, notaOrganizacao: 0, diasAtraso: 0, qtdDefeitos: 0, observacoes: '',
+});
+
+const DEFAULT_CABECALHO = (): FichaCabecalho => ({
+  cliente: '', representante: '', pedido: '', refCliente: '', refMatriz: '',
+  colecao: '', qtdMostruario: 0, custoConfeccaoUnid: 0, quantidadeFicha: 0,
+  dataPedido: '', dataEntrega: '', inicioProducao: '', terminoProducao: '',
+  oficina: '', telefone: '', cortador: '', qtdMoldesTotal: 0, qtdGabaritos: 0,
 });
 
 interface AppState {
@@ -181,6 +188,9 @@ export const useStore = create<AppState>()(
           checkList: data.checkList?.length ? data.checkList : DEFAULT_CHECKLIST.map(c => ({ ...c, id: uuidv4() })),
           romaneio: data.romaneio ?? DEFAULT_ROMANEIO(),
           relatorio: data.relatorio ?? DEFAULT_RELATORIO(),
+          cabecalho: data.cabecalho ?? DEFAULT_CABECALHO(),
+          tecidosCorte: data.tecidosCorte ?? [],
+          aviamentosFicha: data.aviamentosFicha ?? [],
           criadoEm: now(),
           atualizadoEm: now(),
         };
