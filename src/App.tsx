@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom';
+import { isElectron } from './lib/storage';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import EstoqueInsumos from './pages/EstoqueInsumos';
@@ -15,9 +16,12 @@ import Historico from './pages/Historico';
 import Usuarios from './pages/Usuarios';
 import Configuracoes from './pages/Configuracoes';
 
+// HashRouter works on file:// (Electron); BrowserRouter works on http:// (web server)
+const Router = isElectron() ? HashRouter : BrowserRouter;
+
 export default function App() {
   return (
-    <BrowserRouter>
+    <Router>
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
@@ -36,6 +40,6 @@ export default function App() {
           <Route path="/configuracoes" element={<Configuracoes />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </Router>
   );
 }
