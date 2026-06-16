@@ -4,13 +4,16 @@ import { useStore } from '../store/useStore';
 import type { OrdemProducao, StatusProducao } from '../types';
 
 const colunas: { id: StatusProducao; label: string; emoji: string; color: string }[] = [
-  { id: 'criada', label: 'Criada', emoji: '📝', color: 'bg-slate-50 border-slate-200' },
-  { id: 'revisao', label: 'Revisão', emoji: '🔍', color: 'bg-yellow-50 border-yellow-200' },
-  { id: 'aprovada', label: 'Aprovada', emoji: '✅', color: 'bg-blue-50 border-blue-200' },
-  { id: 'corte', label: 'Corte', emoji: '✂️', color: 'bg-orange-50 border-orange-200' },
-  { id: 'costura', label: 'Costura', emoji: '🧵', color: 'bg-purple-50 border-purple-200' },
-  { id: 'acabamento', label: 'Acabamento', emoji: '🔧', color: 'bg-indigo-50 border-indigo-200' },
-  { id: 'finalizada', label: 'Finalizada', emoji: '📦', color: 'bg-green-50 border-green-200' },
+  { id: 'criada',    label: 'Criada',    emoji: '📝', color: 'bg-slate-50 border-slate-200' },
+  { id: 'orcamento', label: 'Orçamento', emoji: '💰', color: 'bg-yellow-50 border-yellow-200' },
+  { id: 'aprovada',  label: 'Aprovada',  emoji: '✅', color: 'bg-blue-50 border-blue-200' },
+  { id: 'separacao', label: 'Separação', emoji: '📦', color: 'bg-orange-50 border-orange-200' },
+  { id: 'oficina',   label: 'Oficina',   emoji: '🏭', color: 'bg-purple-50 border-purple-200' },
+  { id: 'corte',     label: 'Corte',     emoji: '✂️', color: 'bg-red-50 border-red-200' },
+  { id: 'costura',   label: 'Costura',   emoji: '🧵', color: 'bg-pink-50 border-pink-200' },
+  { id: 'revisao',   label: 'Revisão',   emoji: '🔍', color: 'bg-amber-50 border-amber-200' },
+  { id: 'enviada',   label: 'Enviada',   emoji: '🚚', color: 'bg-teal-50 border-teal-200' },
+  { id: 'finalizada',label: 'Finalizada',emoji: '🎉', color: 'bg-green-50 border-green-200' },
 ];
 
 function Card({ ordem }: { ordem: OrdemProducao }) {

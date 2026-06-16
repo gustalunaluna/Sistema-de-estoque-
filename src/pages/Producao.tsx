@@ -8,16 +8,22 @@ import Modal from '../components/Modal';
 import Badge from '../components/Badge';
 
 const statusConfig: Record<StatusProducao, { label: string; emoji: string; variant: 'gray' | 'yellow' | 'blue' | 'orange' | 'purple' | 'red' | 'green' }> = {
-  criada: { label: 'Criada', emoji: '📝', variant: 'gray' },
-  revisao: { label: 'Revisão', emoji: '🔍', variant: 'yellow' },
-  aprovada: { label: 'Aprovada', emoji: '✅', variant: 'blue' },
-  corte: { label: 'Corte', emoji: '✂️', variant: 'orange' },
-  costura: { label: 'Costura', emoji: '🧵', variant: 'purple' },
-  acabamento: { label: 'Acabamento', emoji: '🔧', variant: 'red' },
-  finalizada: { label: 'Finalizada', emoji: '📦', variant: 'green' },
+  criada:    { label: 'Criada',    emoji: '📝', variant: 'gray' },
+  orcamento: { label: 'Orçamento', emoji: '💰', variant: 'yellow' },
+  aprovada:  { label: 'Aprovada',  emoji: '✅', variant: 'blue' },
+  separacao: { label: 'Separação', emoji: '📦', variant: 'orange' },
+  oficina:   { label: 'Oficina',   emoji: '🏭', variant: 'purple' },
+  corte:     { label: 'Corte',     emoji: '✂️', variant: 'orange' },
+  costura:   { label: 'Costura',   emoji: '🧵', variant: 'purple' },
+  revisao:   { label: 'Revisão',   emoji: '🔍', variant: 'yellow' },
+  enviada:   { label: 'Enviada',   emoji: '🚚', variant: 'blue' },
+  finalizada:{ label: 'Finalizada',emoji: '🎉', variant: 'green' },
 };
 
-const statusOrder: StatusProducao[] = ['criada', 'revisao', 'aprovada', 'corte', 'costura', 'acabamento', 'finalizada'];
+const statusOrder: StatusProducao[] = [
+  'criada', 'orcamento', 'aprovada', 'separacao', 'oficina',
+  'corte', 'costura', 'revisao', 'enviada', 'finalizada',
+];
 
 const emptyForm = (): Omit<OrdemProducao, 'id' | 'criadoEm' | 'atualizadoEm'> => ({
   modeloId: '',

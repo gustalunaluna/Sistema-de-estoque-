@@ -1,10 +1,20 @@
 import { useState, useRef } from 'react';
 import { Plus, Search, Edit2, Trash2, FileText, X, Upload, Download, CheckCircle, AlertCircle, Package } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import type { FichaTecnica, ItemFichaTecnica } from '../types';
+import type { FichaTecnica, ItemFichaTecnica, SecaoFicha } from '../types';
 import Modal from '../components/Modal';
 import Badge from '../components/Badge';
 import { parseExcelFicha, processarImport, exportarFichaExcel } from '../utils/excelFicha';
+
+const SECAO_LABELS: Record<SecaoFicha, string> = {
+  corte: 'Corte',
+  aviamentos: 'Aviamentos',
+  acabamento: 'Acabamento',
+  cliente: 'Cliente',
+  travetes: 'Travetes',
+};
+
+type ViewTab = 'materiais' | 'corte' | 'aviamentos' | 'checklist' | 'romaneio' | 'relatorio';
 
 const emptyForm = (modeloId = ''): Omit<FichaTecnica, 'id' | 'criadoEm' | 'atualizadoEm'> => ({
   modeloId,
@@ -13,6 +23,10 @@ const emptyForm = (modeloId = ''): Omit<FichaTecnica, 'id' | 'criadoEm' | 'atual
   custoMaoDeObra: 0,
   outrosCustos: 0,
   margemLucro: 20,
+  moldes: [],
+  checkList: [],
+  romaneio: { oficina: '', telefone: '', dataEnvio: '', dataRetirada: '', qtdEnviada: 0, desconto: 0, totalFicha: 0, observacoes: '' },
+  relatorio: { oficina: '', prazoEntrega: '', corteTecidosOk: null, corteAviamentosOk: null, retalhosTecidosOk: null, retalhosAviamentosOk: null, notaQualidade: 0, notaOrganizacao: 0, diasAtraso: 0, qtdDefeitos: 0, observacoes: '' },
 });
 
 export default function FichasTecnicas() {
@@ -24,6 +38,7 @@ export default function FichasTecnicas() {
   const [modalView, setModalView] = useState<FichaTecnica | null>(null);
   const [modalImport, setModalImport] = useState(false);
   const [form, setForm] = useState(emptyForm());
+  const [viewTab, setViewTab] = useState<ViewTab>('materiais');
 
   // Import state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -53,7 +68,7 @@ export default function FichasTecnicas() {
   const calcCustoTotal = (f: typeof form) => calcCustoMateriais(f.itens) + f.custoMaoDeObra + f.outrosCustos;
   const calcPrecoVenda = (f: typeof form) => calcCustoTotal(f) * (1 + f.margemLucro / 100);
 
-  const addItem = () => setForm(f => ({ ...f, itens: [...f.itens, { insumoId: '', quantidade: 1 }] }));
+  const addItem = () => setForm(f => ({ ...f, itens: [...f.itens, { insumoId: '', quantidade: 1, secao: 'corte' as SecaoFicha }] }));
   const removeItem = (idx: number) => setForm(f => ({ ...f, itens: f.itens.filter((_, i) => i !== idx) }));
   const updateItem = (idx: number, data: Partial<ItemFichaTecnica>) =>
     setForm(f => ({ ...f, itens: f.itens.map((it, i) => i === idx ? { ...it, ...data } : it) }));
@@ -61,6 +76,47 @@ export default function FichasTecnicas() {
   const handleAdd = () => { addFichaTecnica(form); setForm(emptyForm()); setModalAdd(false); };
   const handleEdit = () => { if (!modalEdit) return; updateFichaTecnica(modalEdit.id, form); setModalEdit(null); };
   const openEdit = (ficha: FichaTecnica) => { setForm({ ...ficha }); setModalEdit(ficha); };
+  const openView = (ficha: FichaTecnica) => { setModalView(ficha); setViewTab('materiais'); };
+
+  const toggleCheckItem = (itemId: string, ok: boolean | null) => {
+    if (!modalView) return;
+    const newCheckList = modalView.checkList.map(c => c.id === itemId ? { ...c, ok } : c);
+    updateFichaTecnica(modalView.id, { checkList: newCheckList });
+    setModalView(prev => prev ? { ...prev, checkList: newCheckList } : prev);
+  };
+
+  const ItensTable = ({ itens }: { itens: ItemFichaTecnica[] }) => (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="bg-slate-50 text-left text-xs text-slate-500">
+          <th className="p-2">Material</th>
+          <th className="p-2">Seção</th>
+          <th className="p-2">Qtd</th>
+          <th className="p-2">Unid.</th>
+          <th className="p-2">Vlr. Unit.</th>
+          <th className="p-2">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {itens.map((item, i) => {
+          const ins = insumos.find(x => x.id === item.insumoId);
+          return (
+            <tr key={i} className="border-b border-slate-50">
+              <td className="p-2 font-medium">{ins?.nome ?? '—'}</td>
+              <td className="p-2 text-slate-400 text-xs">{item.secao ? (SECAO_LABELS[item.secao] ?? item.secao) : '—'}</td>
+              <td className="p-2">{item.quantidade}</td>
+              <td className="p-2 text-slate-400">{ins?.unidade}</td>
+              <td className="p-2">R$ {(ins?.valorUnitario ?? 0).toFixed(2)}</td>
+              <td className="p-2 font-medium">R$ {((ins?.valorUnitario ?? 0) * item.quantidade).toFixed(2)}</td>
+            </tr>
+          );
+        })}
+        {itens.length === 0 && (
+          <tr><td colSpan={6} className="p-4 text-center text-slate-400 text-xs">Nenhum item nesta seção</td></tr>
+        )}
+      </tbody>
+    </table>
+  );
 
   // ─── IMPORT ──────────────────────────────────────────────────────────────────
 
@@ -123,7 +179,7 @@ export default function FichasTecnicas() {
           insumoId = found?.id ?? novosInsumosIds[r.insumoNome.toLowerCase().trim()];
         }
         if (!insumoId) return null;
-        return { insumoId, quantidade: r.quantidade };
+        return { insumoId, quantidade: r.quantidade, secao: (r.secao as SecaoFicha | undefined) ?? 'corte' };
       })
       .filter(Boolean) as ItemFichaTecnica[];
 
@@ -185,7 +241,14 @@ export default function FichasTecnicas() {
                     <option value="">Selecione o material...</option>
                     {insumos.map(i => <option key={i.id} value={i.id}>{i.nome} ({i.unidade})</option>)}
                   </select>
-                  <input type="number" className="input w-24 text-sm" value={item.quantidade} min="0" step="0.01"
+                  <select className="input w-28 text-sm" value={item.secao ?? 'corte'} onChange={e => updateItem(idx, { secao: e.target.value as SecaoFicha })}>
+                    <option value="corte">Corte</option>
+                    <option value="aviamentos">Aviamentos</option>
+                    <option value="acabamento">Acabamento</option>
+                    <option value="cliente">Cliente</option>
+                    <option value="travetes">Travetes</option>
+                  </select>
+                  <input type="number" className="input w-20 text-sm" value={item.quantidade} min="0" step="0.01"
                     onChange={e => updateItem(idx, { quantidade: Number(e.target.value) })} placeholder="Qtd" />
                   {ins && <span className="text-xs text-slate-500 w-20 text-right">R$ {(ins.valorUnitario * item.quantidade).toFixed(2)}</span>}
                   <button type="button" onClick={() => removeItem(idx)} className="text-slate-400 hover:text-red-500"><X size={14} /></button>
@@ -265,7 +328,7 @@ export default function FichasTecnicas() {
                 <div className="flex justify-between text-slate-500"><span>Tempo:</span><span>{ficha.tempoProdução} min</span></div>
               </div>
               <div className="flex gap-1 pt-3 border-t border-slate-50">
-                <button onClick={() => setModalView(ficha)} className="flex-1 text-xs text-blue-600 hover:underline">Ver ficha</button>
+                <button onClick={() => openView(ficha)} className="flex-1 text-xs text-blue-600 hover:underline">Ver ficha</button>
                 <button
                   onClick={() => handleExport(ficha)}
                   className="p-1.5 text-green-600 hover:bg-green-50 rounded"
@@ -435,9 +498,32 @@ export default function FichasTecnicas() {
       )}
 
       {modalView && (
-        <Modal title={`Ficha Técnica — ${modelos.find(m => m.id === modalView.modeloId)?.nome}`} onClose={() => setModalView(null)} size="lg">
+        <Modal title={`Ficha Técnica — ${modelos.find(m => m.id === modalView.modeloId)?.nome}`} onClose={() => setModalView(null)} size="xl">
           <div className="space-y-4">
-            <div className="flex justify-end">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              {/* Tab bar */}
+              <div className="flex gap-1 flex-wrap">
+                {([
+                  ['materiais', 'Materiais'],
+                  ['corte', 'Ficha Corte'],
+                  ['aviamentos', 'Aviamentos'],
+                  ['checklist', 'Check List'],
+                  ['romaneio', 'Romaneio'],
+                  ['relatorio', 'Relatório'],
+                ] as [ViewTab, string][]).map(([tab, lbl]) => (
+                  <button
+                    key={tab}
+                    onClick={() => setViewTab(tab)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      viewTab === tab
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
               <button
                 onClick={() => handleExport(modalView)}
                 className="flex items-center gap-1.5 text-sm text-green-600 border border-green-200 px-3 py-1.5 rounded-lg hover:bg-green-50"
@@ -445,43 +531,158 @@ export default function FichasTecnicas() {
                 <Download size={14} /> Exportar Excel
               </button>
             </div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 text-left text-xs text-slate-500">
-                  <th className="p-2">Material</th>
-                  <th className="p-2">Qtd</th>
-                  <th className="p-2">Unid.</th>
-                  <th className="p-2">Vlr. Unit.</th>
-                  <th className="p-2">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {modalView.itens.map((item, i) => {
-                  const ins = insumos.find(x => x.id === item.insumoId);
+
+            {/* Tab: Materiais (todos) */}
+            {viewTab === 'materiais' && (
+              <div className="space-y-3">
+                <div className="border border-slate-100 rounded-lg overflow-hidden">
+                  <ItensTable itens={modalView.itens} />
+                </div>
+                <div className="bg-slate-50 rounded-lg p-4 space-y-1 text-sm">
+                  <div className="flex justify-between"><span>Custo materiais:</span><strong>R$ {calcCustoMateriais(modalView.itens).toFixed(2)}</strong></div>
+                  <div className="flex justify-between"><span>Mão de obra:</span><strong>R$ {modalView.custoMaoDeObra.toFixed(2)}</strong></div>
+                  <div className="flex justify-between"><span>Outros:</span><strong>R$ {modalView.outrosCustos.toFixed(2)}</strong></div>
+                  <div className="flex justify-between text-base font-bold border-t border-slate-200 pt-2 mt-2">
+                    <span>Custo total:</span><span>R$ {calcCustoTotal(modalView).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-green-600">
+                    <span>Preço sugerido ({modalView.margemLucro}% margem):</span>
+                    <strong>R$ {calcPrecoVenda(modalView).toFixed(2)}</strong>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab: Ficha Corte */}
+            {viewTab === 'corte' && (
+              <div className="border border-slate-100 rounded-lg overflow-hidden">
+                <div className="bg-blue-50 px-4 py-2 text-xs font-semibold text-blue-700 uppercase tracking-wide">Ficha Técnica de Corte</div>
+                <ItensTable itens={modalView.itens.filter(i => i.secao === 'corte' || !i.secao)} />
+              </div>
+            )}
+
+            {/* Tab: Aviamentos */}
+            {viewTab === 'aviamentos' && (
+              <div className="space-y-3">
+                {(['aviamentos', 'acabamento', 'cliente', 'travetes'] as SecaoFicha[]).map(secao => {
+                  const itensSecao = modalView.itens.filter(i => i.secao === secao);
                   return (
-                    <tr key={i} className="border-b border-slate-50">
-                      <td className="p-2 font-medium">{ins?.nome ?? '—'}</td>
-                      <td className="p-2">{item.quantidade}</td>
-                      <td className="p-2 text-slate-400">{ins?.unidade}</td>
-                      <td className="p-2">R$ {(ins?.valorUnitario ?? 0).toFixed(2)}</td>
-                      <td className="p-2 font-medium">R$ {((ins?.valorUnitario ?? 0) * item.quantidade).toFixed(2)}</td>
-                    </tr>
+                    <div key={secao} className="border border-slate-100 rounded-lg overflow-hidden">
+                      <div className="bg-purple-50 px-4 py-2 text-xs font-semibold text-purple-700 uppercase tracking-wide">{SECAO_LABELS[secao]}</div>
+                      <ItensTable itens={itensSecao} />
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-            <div className="bg-slate-50 rounded-lg p-4 space-y-1 text-sm">
-              <div className="flex justify-between"><span>Custo materiais:</span><strong>R$ {calcCustoMateriais(modalView.itens).toFixed(2)}</strong></div>
-              <div className="flex justify-between"><span>Mão de obra:</span><strong>R$ {modalView.custoMaoDeObra.toFixed(2)}</strong></div>
-              <div className="flex justify-between"><span>Outros:</span><strong>R$ {modalView.outrosCustos.toFixed(2)}</strong></div>
-              <div className="flex justify-between text-base font-bold border-t border-slate-200 pt-2 mt-2">
-                <span>Custo total:</span><span>R$ {calcCustoTotal(modalView).toFixed(2)}</span>
               </div>
-              <div className="flex justify-between text-green-600">
-                <span>Preço sugerido ({modalView.margemLucro}% margem):</span>
-                <strong>R$ {calcPrecoVenda(modalView).toFixed(2)}</strong>
+            )}
+
+            {/* Tab: Check List */}
+            {viewTab === 'checklist' && (
+              <div className="space-y-2">
+                <p className="text-xs text-slate-400">Clique para marcar cada item do check list</p>
+                {modalView.checkList.length === 0 && (
+                  <p className="text-center py-6 text-slate-400 text-sm">Nenhum item no check list</p>
+                )}
+                {modalView.checkList.map(item => (
+                  <div key={item.id} className="flex items-center gap-3 bg-slate-50 rounded-lg p-3">
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => toggleCheckItem(item.id, item.ok === true ? null : true)}
+                        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${item.ok === true ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-500 hover:bg-green-100'}`}
+                      >OK</button>
+                      <button
+                        onClick={() => toggleCheckItem(item.id, item.ok === false ? null : false)}
+                        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${item.ok === false ? 'bg-red-500 text-white' : 'bg-slate-200 text-slate-500 hover:bg-red-100'}`}
+                      >NOK</button>
+                    </div>
+                    <div className="flex-1">
+                      <p className={`text-sm font-medium ${item.ok === true ? 'text-green-700' : item.ok === false ? 'text-red-700' : 'text-slate-700'}`}>
+                        {item.descricao}
+                      </p>
+                      {item.obs && <p className="text-xs text-slate-400">{item.obs}</p>}
+                    </div>
+                    {item.responsavel && <span className="text-xs text-slate-400">{item.responsavel}</span>}
+                  </div>
+                ))}
+                <div className="flex gap-4 text-xs pt-1">
+                  <span className="text-green-600 font-medium">✓ {modalView.checkList.filter(c => c.ok === true).length} OK</span>
+                  <span className="text-red-500 font-medium">✗ {modalView.checkList.filter(c => c.ok === false).length} NOK</span>
+                  <span className="text-slate-400">{modalView.checkList.filter(c => c.ok === null).length} pendentes</span>
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Tab: Romaneio */}
+            {viewTab === 'romaneio' && (
+              <div className="space-y-3">
+                <h3 className="font-semibold text-slate-700">Romaneio de Produção</h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  {[
+                    ['Oficina', modalView.romaneio.oficina],
+                    ['Telefone', modalView.romaneio.telefone],
+                    ['Data Envio', modalView.romaneio.dataEnvio],
+                    ['Data Retirada', modalView.romaneio.dataRetirada],
+                    ['Qtd Enviada', String(modalView.romaneio.qtdEnviada)],
+                    ['Desconto (R$)', `R$ ${modalView.romaneio.desconto.toFixed(2)}`],
+                    ['Total Ficha (R$)', `R$ ${modalView.romaneio.totalFicha.toFixed(2)}`],
+                  ].map(([label, value]) => (
+                    <div key={label} className="bg-slate-50 rounded-lg p-3">
+                      <p className="text-xs text-slate-400">{label}</p>
+                      <p className="font-medium text-slate-700">{value || '—'}</p>
+                    </div>
+                  ))}
+                </div>
+                {modalView.romaneio.observacoes && (
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-xs text-slate-400 mb-1">Observações</p>
+                    <p className="text-sm text-slate-700">{modalView.romaneio.observacoes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab: Relatório */}
+            {viewTab === 'relatorio' && (
+              <div className="space-y-3">
+                <h3 className="font-semibold text-slate-700">Relatório de Produção</h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  {[
+                    ['Oficina', modalView.relatorio.oficina],
+                    ['Prazo Entrega', modalView.relatorio.prazoEntrega],
+                    ['Nota Qualidade', String(modalView.relatorio.notaQualidade)],
+                    ['Nota Organização', String(modalView.relatorio.notaOrganizacao)],
+                    ['Dias Atraso', String(modalView.relatorio.diasAtraso)],
+                    ['Qtd Defeitos', String(modalView.relatorio.qtdDefeitos)],
+                  ].map(([label, value]) => (
+                    <div key={label} className="bg-slate-50 rounded-lg p-3">
+                      <p className="text-xs text-slate-400">{label}</p>
+                      <p className="font-medium text-slate-700">{value || '—'}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  {[
+                    ['Corte Tecidos', modalView.relatorio.corteTecidosOk],
+                    ['Corte Aviamentos', modalView.relatorio.corteAviamentosOk],
+                    ['Retalhos Tecidos', modalView.relatorio.retalhosTecidosOk],
+                    ['Retalhos Aviamentos', modalView.relatorio.retalhosAviamentosOk],
+                  ].map(([label, val]) => (
+                    <div key={String(label)} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                      <span className="text-slate-600 text-xs">{label}</span>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${val === true ? 'bg-green-100 text-green-700' : val === false ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-500'}`}>
+                        {val === true ? 'OK' : val === false ? 'NOK' : 'N/A'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {modalView.relatorio.observacoes && (
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-xs text-slate-400 mb-1">Observações</p>
+                    <p className="text-sm text-slate-700">{modalView.relatorio.observacoes}</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </Modal>
       )}

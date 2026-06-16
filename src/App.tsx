@@ -13,6 +13,7 @@ import Compras from './pages/Compras';
 import Relatorios from './pages/Relatorios';
 import Historico from './pages/Historico';
 import Usuarios from './pages/Usuarios';
+import Configuracoes from './pages/Configuracoes';
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
           <Route path="/relatorios" element={<Relatorios />} />
           <Route path="/historico" element={<Historico />} />
           <Route path="/usuarios" element={<Usuarios />} />
+          <Route path="/configuracoes" element={<Configuracoes />} />
         </Route>
       </Routes>
     </BrowserRouter>

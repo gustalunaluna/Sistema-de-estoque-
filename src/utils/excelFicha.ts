@@ -117,11 +117,11 @@ export function parseExcelFicha(buffer: ArrayBuffer): {
 
   // ── Parse material sections ─────────────────────────────────────
   const secaoMarcadores = [
-    { marcador: 'DIVISÃO TECIDOS', secao: 'Tecidos' },
-    { marcador: 'AVIAMENTOS CLIENTE', secao: 'Aviamentos Cliente' },
-    { marcador: 'TRAVETES', secao: 'Travetes' },
-    { marcador: 'ACABAMENTO', secao: 'Acabamento' },
-    { marcador: 'AVIAMENTOS', secao: 'Aviamentos' },
+    { marcador: 'DIVISÃO TECIDOS', secao: 'corte' },
+    { marcador: 'AVIAMENTOS CLIENTE', secao: 'cliente' },
+    { marcador: 'TRAVETES', secao: 'travetes' },
+    { marcador: 'ACABAMENTO', secao: 'acabamento' },
+    { marcador: 'AVIAMENTOS', secao: 'aviamentos' },
   ];
 
   const itensRaw: ItemExtraido[] = [];
@@ -181,7 +181,7 @@ export interface ImportResult {
   modeloNovo: Omit<Modelo, 'id' | 'criadoEm' | 'atualizadoEm'>;
   fichaNova: Omit<FichaTecnica, 'id' | 'criadoEm' | 'atualizadoEm' | 'modeloId'>;
   insumosParaCriar: Omit<Insumo, 'id' | 'criadoEm' | 'atualizadoEm'>[];
-  insumosResolvidos: { insumoExistenteId?: string; insumoNome: string; quantidade: number; isNovo: boolean }[];
+  insumosResolvidos: { insumoExistenteId?: string; insumoNome: string; quantidade: number; isNovo: boolean; secao?: string }[];
 }
 
 export function processarImport(
@@ -205,6 +205,7 @@ export function processarImport(
         insumoNome: existente.nome,
         quantidade: item.quantidade,
         isNovo: false,
+        secao: item.secao,
       });
     } else {
       if (!jaAdicionados.has(nomeNorm)) {
@@ -225,6 +226,7 @@ export function processarImport(
         insumoNome: item.nome,
         quantidade: item.quantidade,
         isNovo: true,
+        secao: item.secao,
       });
     }
   });
@@ -245,6 +247,10 @@ export function processarImport(
     custoMaoDeObra: 0,
     outrosCustos: 0,
     margemLucro: 20,
+    moldes: [],
+    checkList: [],
+    romaneio: { oficina: '', telefone: '', dataEnvio: '', dataRetirada: '', qtdEnviada: 0, desconto: 0, totalFicha: 0, observacoes: '' },
+    relatorio: { oficina: '', prazoEntrega: '', corteTecidosOk: null, corteAviamentosOk: null, retalhosTecidosOk: null, retalhosAviamentosOk: null, notaQualidade: 0, notaOrganizacao: 0, diasAtraso: 0, qtdDefeitos: 0, observacoes: '' },
   };
 
   return { modeloNovo, fichaNova, insumosParaCriar, insumosResolvidos };

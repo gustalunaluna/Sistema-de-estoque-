@@ -23,12 +23,17 @@ export type StatusModelo = 'desenvolvimento' | 'revisao' | 'aprovado' | 'finaliz
 
 export type StatusProducao =
   | 'criada'
-  | 'revisao'
+  | 'orcamento'
   | 'aprovada'
+  | 'separacao'
+  | 'oficina'
   | 'corte'
   | 'costura'
-  | 'acabamento'
+  | 'revisao'
+  | 'enviada'
   | 'finalizada';
+
+export type SecaoFicha = 'corte' | 'aviamentos' | 'acabamento' | 'cliente' | 'travetes';
 
 export type NivelUsuario = 'administrador' | 'estoque' | 'producao' | 'comercial';
 
@@ -61,6 +66,48 @@ export interface MovimentacaoInsumo {
 export interface ItemFichaTecnica {
   insumoId: string;
   quantidade: number;
+  secao: SecaoFicha;
+}
+
+export interface CheckListItem {
+  id: string;
+  descricao: string;
+  ok: boolean | null;
+  responsavel: string;
+  obs: string;
+}
+
+export interface RomaneioData {
+  oficina: string;
+  telefone: string;
+  dataEnvio: string;
+  dataRetirada: string;
+  qtdEnviada: number;
+  desconto: number;
+  totalFicha: number;
+  observacoes: string;
+}
+
+export interface RelatorioProducao {
+  oficina: string;
+  prazoEntrega: string;
+  corteTecidosOk: boolean | null;
+  corteAviamentosOk: boolean | null;
+  retalhosTecidosOk: boolean | null;
+  retalhosAviamentosOk: boolean | null;
+  notaQualidade: number;
+  notaOrganizacao: number;
+  diasAtraso: number;
+  qtdDefeitos: number;
+  observacoes: string;
+}
+
+export interface MoldeItem {
+  id: string;
+  numero: string;
+  descricao: string;
+  quantidade: string;
+  cor: string;
 }
 
 export interface FichaTecnica {
@@ -71,6 +118,10 @@ export interface FichaTecnica {
   custoMaoDeObra: number;
   outrosCustos: number;
   margemLucro: number;
+  moldes: MoldeItem[];
+  checkList: CheckListItem[];
+  romaneio: RomaneioData;
+  relatorio: RelatorioProducao;
   criadoEm: string;
   atualizadoEm: string;
 }
@@ -170,4 +221,12 @@ export interface HistoricoAlteracao {
   antes?: string;
   depois?: string;
   data: string;
+}
+
+export interface ConfiguracaoApp {
+  dataPath: string;
+  nomeFabrica: string;
+  cnpj: string;
+  endereco: string;
+  telefone: string;
 }

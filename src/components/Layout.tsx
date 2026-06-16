@@ -4,14 +4,14 @@ import {
   LayoutDashboard, Package, Layers, FileText, Factory,
   Kanban, Users, ShoppingCart, Truck, BarChart3, History,
   UserCog, ChevronLeft, ChevronRight, Menu, LogOut,
-  DollarSign, Bell
+  DollarSign, Bell, Settings
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/insumos', icon: Package, label: 'Est. Insumos' },
-  { to: '/modelos', icon: Layers, label: 'Est. Pilotagem' },
+  { to: '/insumos', icon: Package, label: 'Estoque' },
+  { to: '/modelos', icon: Layers, label: 'Modelos' },
   { to: '/fichas', icon: FileText, label: 'Fichas Técnicas' },
   { to: '/producao', icon: Factory, label: 'Produção' },
   { to: '/kanban', icon: Kanban, label: 'Kanban' },
@@ -22,6 +22,7 @@ const navItems = [
   { to: '/relatorios', icon: BarChart3, label: 'Relatórios' },
   { to: '/historico', icon: History, label: 'Histórico' },
   { to: '/usuarios', icon: UserCog, label: 'Usuários' },
+  { to: '/configuracoes', icon: Settings, label: 'Configurações' },
 ];
 
 export default function Layout() {
