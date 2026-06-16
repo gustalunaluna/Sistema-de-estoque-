@@ -1,9 +1,9 @@
 #!/bin/bash
 echo ""
-echo " ╔══════════════════════════════════════════╗"
-echo " ║         FabricaERP  v1.0.0               ║"
-echo " ║    Sistema de Gestão Industrial           ║"
-echo " ╚══════════════════════════════════════════╝"
+echo " ╔══════════════════════════════════════════════════╗"
+echo " ║    Sistema ERP de Gestão Industrial  v1.0.0     ║"
+echo " ║    Modo: Servidor Web Local                     ║"
+echo " ╚══════════════════════════════════════════════════╝"
 echo ""
 
 # Verificar Node.js

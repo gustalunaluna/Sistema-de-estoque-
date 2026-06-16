@@ -1,12 +1,12 @@
 @echo off
 chcp 65001 > nul
-title FabricaERP — Servidor Local
+title Sistema ERP de Gestão Industrial — Servidor Local
 
 echo.
-echo  ╔══════════════════════════════════════════╗
-echo  ║         FabricaERP  v1.0.0               ║
-echo  ║    Sistema de Gestão Industrial           ║
-echo  ╚══════════════════════════════════════════╝
+echo  ╔══════════════════════════════════════════════════╗
+echo  ║    Sistema ERP de Gestão Industrial  v1.0.0      ║
+echo  ║    Modo: Servidor Web Local                      ║
+echo  ╚══════════════════════════════════════════════════╝
 echo.
 
 :: Verificar se Node.js está instalado
@@ -14,7 +14,7 @@ node --version > nul 2>&1
 if %errorlevel% neq 0 (
     echo  ❌ ERRO: Node.js não encontrado no seu computador!
     echo.
-    echo  Para usar o FabricaERP, você precisa instalar o Node.js:
+    echo  Para usar o ERP, você precisa instalar o Node.js:
     echo.
     echo  1. Acesse:  https://nodejs.org
     echo  2. Clique em "Download LTS"

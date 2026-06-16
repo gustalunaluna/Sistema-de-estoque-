@@ -1,9 +1,9 @@
 {
-  "name": "fabrica-erp",
-  "productName": "FabricaERP",
+  "name": "sistema-erp-gestao",
+  "productName": "Sistema ERP de Gestão Industrial",
   "private": true,
   "version": "1.0.0",
-  "description": "Sistema ERP para fábrica de bolsas e acessórios",
+  "description": "Sistema ERP para gestão industrial — estoque, produção, fichas técnicas e relatórios",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -19,40 +19,47 @@
     "electron:build:linux": "npm run build && electron-builder --linux"
   },
   "build": {
-    "appId": "com.fabricaerp.app",
-    "productName": "FabricaERP",
+    "appId": "com.erp.gestao.industrial",
+    "productName": "Sistema ERP de Gestão Industrial",
     "asar": false,
+    "icon": "build/icon.png",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "public/icon.png",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "public/icon.png",
+        "to": "icon.png"
+      }
+    ],
     "win": {
+      "icon": "build/icon.png",
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         },
         {
           "target": "portable",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         }
-      ]
+      ],
+      "requestedExecutionLevel": "asInvoker"
     },
     "mac": {
+      "icon": "build/icon.png",
       "target": "dmg",
       "category": "public.app-category.business"
     },
     "linux": {
+      "icon": "build/icon.png",
       "target": "AppImage",
-      "icon": "public/icon.png",
       "category": "Office"
     },
     "nsis": {
@@ -60,7 +67,11 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "FabricaERP"
+      "shortcutName": "ERP Gestão Industrial",
+      "installerLanguages": ["pt_BR"],
+      "language": "1046",
+      "license": false,
+      "menuCategory": "ERP Gestão Industrial"
     }
   },
   "dependencies": {
