@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { Plus, Search, Edit2, Trash2, FileText, X } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Plus, Search, Edit2, Trash2, FileText, X, Upload, Download, CheckCircle, AlertCircle, Package } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { FichaTecnica, ItemFichaTecnica } from '../types';
 import Modal from '../components/Modal';
 import Badge from '../components/Badge';
+import { parseExcelFicha, processarImport, exportarFichaExcel } from '../utils/excelFicha';
 
 const emptyForm = (modeloId = ''): Omit<FichaTecnica, 'id' | 'criadoEm' | 'atualizadoEm'> => ({
   modeloId,
@@ -15,12 +16,23 @@ const emptyForm = (modeloId = ''): Omit<FichaTecnica, 'id' | 'criadoEm' | 'atual
 });
 
 export default function FichasTecnicas() {
-  const { fichasTecnicas, addFichaTecnica, updateFichaTecnica, deleteFichaTecnica, modelos, insumos } = useStore();
+  const store = useStore();
+  const { fichasTecnicas, addFichaTecnica, updateFichaTecnica, deleteFichaTecnica, modelos, insumos, addInsumo, addModelo, clientes } = store;
   const [search, setSearch] = useState('');
   const [modalAdd, setModalAdd] = useState(false);
   const [modalEdit, setModalEdit] = useState<FichaTecnica | null>(null);
   const [modalView, setModalView] = useState<FichaTecnica | null>(null);
+  const [modalImport, setModalImport] = useState(false);
   const [form, setForm] = useState(emptyForm());
+
+  // Import state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importPreview, setImportPreview] = useState<{
+    parsed: ReturnType<typeof parseExcelFicha>;
+    processed: ReturnType<typeof processarImport>;
+  } | null>(null);
+  const [importStatus, setImportStatus] = useState<'idle' | 'parsing' | 'preview' | 'done' | 'error'>('idle');
+  const [importError, setImportError] = useState('');
 
   const fichasComModelo = fichasTecnicas.map(f => ({
     ...f,
@@ -28,8 +40,8 @@ export default function FichasTecnicas() {
   }));
 
   const filtered = fichasComModelo.filter(f =>
-    f.modelo?.nome.toLowerCase().includes(search.toLowerCase()) ||
-    f.modelo?.codigo.toLowerCase().includes(search.toLowerCase())
+    (f.modelo?.nome.toLowerCase().includes(search.toLowerCase()) ?? false) ||
+    (f.modelo?.codigo.toLowerCase().includes(search.toLowerCase()) ?? false)
   );
 
   const calcCustoMateriais = (itens: ItemFichaTecnica[]) =>
@@ -38,42 +50,113 @@ export default function FichasTecnicas() {
       return sum + (ins?.valorUnitario ?? 0) * item.quantidade;
     }, 0);
 
-  const calcCustoTotal = (f: typeof form) => {
-    const mat = calcCustoMateriais(f.itens);
-    return mat + f.custoMaoDeObra + f.outrosCustos;
-  };
-
+  const calcCustoTotal = (f: typeof form) => calcCustoMateriais(f.itens) + f.custoMaoDeObra + f.outrosCustos;
   const calcPrecoVenda = (f: typeof form) => calcCustoTotal(f) * (1 + f.margemLucro / 100);
 
-  const addItem = () => {
-    setForm(f => ({ ...f, itens: [...f.itens, { insumoId: '', quantidade: 1 }] }));
-  };
-
-  const removeItem = (idx: number) => {
-    setForm(f => ({ ...f, itens: f.itens.filter((_, i) => i !== idx) }));
-  };
-
-  const updateItem = (idx: number, data: Partial<ItemFichaTecnica>) => {
+  const addItem = () => setForm(f => ({ ...f, itens: [...f.itens, { insumoId: '', quantidade: 1 }] }));
+  const removeItem = (idx: number) => setForm(f => ({ ...f, itens: f.itens.filter((_, i) => i !== idx) }));
+  const updateItem = (idx: number, data: Partial<ItemFichaTecnica>) =>
     setForm(f => ({ ...f, itens: f.itens.map((it, i) => i === idx ? { ...it, ...data } : it) }));
+
+  const handleAdd = () => { addFichaTecnica(form); setForm(emptyForm()); setModalAdd(false); };
+  const handleEdit = () => { if (!modalEdit) return; updateFichaTecnica(modalEdit.id, form); setModalEdit(null); };
+  const openEdit = (ficha: FichaTecnica) => { setForm({ ...ficha }); setModalEdit(ficha); };
+
+  // ─── IMPORT ──────────────────────────────────────────────────────────────────
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportStatus('parsing');
+    setImportError('');
+    try {
+      const buffer = await file.arrayBuffer();
+      const parsed = parseExcelFicha(buffer);
+      const processed = processarImport(parsed, insumos);
+      setImportPreview({ parsed, processed });
+      setImportStatus('preview');
+    } catch (err) {
+      setImportError('Erro ao ler o arquivo. Verifique se é um Excel (.xlsx) válido.');
+      setImportStatus('error');
+    }
+    // Reset file input so the same file can be re-selected
+    e.target.value = '';
   };
 
-  const handleAdd = () => {
-    addFichaTecnica(form);
-    setForm(emptyForm());
-    setModalAdd(false);
+  const confirmarImport = () => {
+    if (!importPreview) return;
+    const { processed } = importPreview;
+
+    // 1. Criar novos insumos e guardar os IDs gerados
+    const novosInsumosIds: Record<string, string> = {}; // nome lowercase -> id
+    processed.insumosParaCriar.forEach(insumoData => {
+      // Check again it doesn't exist (race condition guard)
+      const existing = insumos.find(i =>
+        i.nome.toLowerCase().trim().includes(insumoData.nome.toLowerCase().trim())
+      );
+      if (existing) {
+        novosInsumosIds[insumoData.nome.toLowerCase().trim()] = existing.id;
+      } else {
+        addInsumo(insumoData);
+        // The store adds the item synchronously, get the latest
+        const added = useStore.getState().insumos.find(i => i.nome === insumoData.nome);
+        if (added) novosInsumosIds[insumoData.nome.toLowerCase().trim()] = added.id;
+      }
+    });
+
+    // 2. Criar o modelo na pilotagem
+    addModelo(processed.modeloNovo);
+    const modeloCriado = useStore.getState().modelos.find(m => m.nome === processed.modeloNovo.nome);
+    if (!modeloCriado) return;
+
+    // 3. Montar itens da ficha resolvendo IDs
+    const insumosAtualizados = useStore.getState().insumos;
+    const itensFicha: ItemFichaTecnica[] = processed.insumosResolvidos
+      .map(r => {
+        let insumoId = r.insumoExistenteId;
+        if (!insumoId && r.isNovo) {
+          // Try to find by name in the now-updated store
+          const found = insumosAtualizados.find(i =>
+            i.nome.toLowerCase().trim().includes(r.insumoNome.toLowerCase().trim()) ||
+            r.insumoNome.toLowerCase().trim().includes(i.nome.toLowerCase().trim())
+          );
+          insumoId = found?.id ?? novosInsumosIds[r.insumoNome.toLowerCase().trim()];
+        }
+        if (!insumoId) return null;
+        return { insumoId, quantidade: r.quantidade };
+      })
+      .filter(Boolean) as ItemFichaTecnica[];
+
+    // 4. Criar a ficha técnica
+    addFichaTecnica({
+      ...processed.fichaNova,
+      modeloId: modeloCriado.id,
+      itens: itensFicha,
+    });
+
+    setImportStatus('done');
+    setTimeout(() => {
+      setModalImport(false);
+      setImportStatus('idle');
+      setImportPreview(null);
+    }, 2000);
   };
 
-  const handleEdit = () => {
-    if (!modalEdit) return;
-    updateFichaTecnica(modalEdit.id, form);
-    setModalEdit(null);
+  const resetImport = () => {
+    setImportStatus('idle');
+    setImportPreview(null);
+    setImportError('');
   };
 
-  const openEdit = (ficha: FichaTecnica) => {
-    setForm({ ...ficha });
-    setModalEdit(ficha);
+  // ─── EXPORT ──────────────────────────────────────────────────────────────────
+  const handleExport = (ficha: FichaTecnica) => {
+    const modelo = modelos.find(m => m.id === ficha.modeloId);
+    if (!modelo) return;
+    const clienteNome = clientes.find(c => c.id === modelo.clienteId)?.nomeEmpresa ?? '';
+    exportarFichaExcel(modelo, ficha, insumos, clienteNome);
   };
 
+  // ─── FORM ────────────────────────────────────────────────────────────────────
   const FichaForm = () => {
     const custo = calcCustoTotal(form);
     const preco = calcPrecoVenda(form);
@@ -81,17 +164,11 @@ export default function FichasTecnicas() {
       <div className="space-y-5">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Modelo</label>
-          <select
-            className="input"
-            value={form.modeloId}
-            onChange={e => setForm(f => ({ ...f, modeloId: e.target.value }))}
-          >
+          <select className="input" value={form.modeloId} onChange={e => setForm(f => ({ ...f, modeloId: e.target.value }))}>
             <option value="">Selecione um modelo...</option>
             {modelos.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.codigo})</option>)}
           </select>
         </div>
-
-        {/* Materiais */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-semibold text-slate-700">Materiais</h3>
@@ -104,67 +181,33 @@ export default function FichasTecnicas() {
               const ins = insumos.find(i => i.id === item.insumoId);
               return (
                 <div key={idx} className="flex gap-2 items-center bg-slate-50 rounded-lg p-2">
-                  <select
-                    className="input flex-1 text-sm"
-                    value={item.insumoId}
-                    onChange={e => updateItem(idx, { insumoId: e.target.value })}
-                  >
+                  <select className="input flex-1 text-sm" value={item.insumoId} onChange={e => updateItem(idx, { insumoId: e.target.value })}>
                     <option value="">Selecione o material...</option>
                     {insumos.map(i => <option key={i.id} value={i.id}>{i.nome} ({i.unidade})</option>)}
                   </select>
-                  <input
-                    type="number"
-                    className="input w-24 text-sm"
-                    value={item.quantidade}
-                    min="0"
-                    step="0.01"
-                    onChange={e => updateItem(idx, { quantidade: Number(e.target.value) })}
-                    placeholder="Qtd"
-                  />
-                  {ins && (
-                    <span className="text-xs text-slate-500 w-20 text-right">
-                      R$ {(ins.valorUnitario * item.quantidade).toFixed(2)}
-                    </span>
-                  )}
-                  <button type="button" onClick={() => removeItem(idx)} className="text-slate-400 hover:text-red-500">
-                    <X size={14} />
-                  </button>
+                  <input type="number" className="input w-24 text-sm" value={item.quantidade} min="0" step="0.01"
+                    onChange={e => updateItem(idx, { quantidade: Number(e.target.value) })} placeholder="Qtd" />
+                  {ins && <span className="text-xs text-slate-500 w-20 text-right">R$ {(ins.valorUnitario * item.quantidade).toFixed(2)}</span>}
+                  <button type="button" onClick={() => removeItem(idx)} className="text-slate-400 hover:text-red-500"><X size={14} /></button>
                 </div>
               );
             })}
-            {form.itens.length === 0 && (
-              <p className="text-xs text-slate-400 text-center py-3">Nenhum material adicionado</p>
-            )}
+            {form.itens.length === 0 && <p className="text-xs text-slate-400 text-center py-3">Nenhum material adicionado</p>}
           </div>
           <div className="flex justify-end mt-1">
-            <span className="text-sm text-slate-600">
-              Custo materiais: <strong className="text-slate-800">R$ {calcCustoMateriais(form.itens).toFixed(2)}</strong>
-            </span>
+            <span className="text-sm text-slate-600">Custo materiais: <strong className="text-slate-800">R$ {calcCustoMateriais(form.itens).toFixed(2)}</strong></span>
           </div>
         </div>
-
-        {/* Custos */}
         <div className="grid grid-cols-3 gap-3">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Tempo (min)</label>
-            <input type="number" className="input" value={form.tempoProdução} onChange={e => setForm(f => ({ ...f, tempoProdução: Number(e.target.value) }))} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Mão de Obra (R$)</label>
-            <input type="number" step="0.01" className="input" value={form.custoMaoDeObra} onChange={e => setForm(f => ({ ...f, custoMaoDeObra: Number(e.target.value) }))} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Outros Custos (R$)</label>
-            <input type="number" step="0.01" className="input" value={form.outrosCustos} onChange={e => setForm(f => ({ ...f, outrosCustos: Number(e.target.value) }))} />
-          </div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Tempo (min)</label>
+            <input type="number" className="input" value={form.tempoProdução} onChange={e => setForm(f => ({ ...f, tempoProdução: Number(e.target.value) }))} /></div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Mão de Obra (R$)</label>
+            <input type="number" step="0.01" className="input" value={form.custoMaoDeObra} onChange={e => setForm(f => ({ ...f, custoMaoDeObra: Number(e.target.value) }))} /></div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Outros Custos (R$)</label>
+            <input type="number" step="0.01" className="input" value={form.outrosCustos} onChange={e => setForm(f => ({ ...f, outrosCustos: Number(e.target.value) }))} /></div>
         </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Margem de Lucro (%)</label>
-          <input type="number" step="1" className="input w-32" value={form.margemLucro} onChange={e => setForm(f => ({ ...f, margemLucro: Number(e.target.value) }))} />
-        </div>
-
-        {/* Resumo */}
+        <div><label className="block text-sm font-medium text-slate-700 mb-1">Margem de Lucro (%)</label>
+          <input type="number" step="1" className="input w-32" value={form.margemLucro} onChange={e => setForm(f => ({ ...f, margemLucro: Number(e.target.value) }))} /></div>
         <div className="bg-slate-50 rounded-lg p-4 space-y-1 text-sm">
           <div className="flex justify-between"><span className="text-slate-500">Custo total:</span><strong>R$ {custo.toFixed(2)}</strong></div>
           <div className="flex justify-between"><span className="text-slate-500">Preço sugerido ({form.margemLucro}% margem):</span><strong className="text-green-600">R$ {preco.toFixed(2)}</strong></div>
@@ -175,14 +218,22 @@ export default function FichasTecnicas() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Fichas Técnicas</h1>
           <p className="text-sm text-slate-500">{fichasTecnicas.length} fichas cadastradas</p>
         </div>
-        <button onClick={() => { setForm(emptyForm()); setModalAdd(true); }} className="btn-primary">
-          <Plus size={16} /> Nova Ficha
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setModalImport(true); resetImport(); }}
+            className="flex items-center gap-1.5 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+          >
+            <Upload size={16} /> Importar Excel
+          </button>
+          <button onClick={() => { setForm(emptyForm()); setModalAdd(true); }} className="btn-primary">
+            <Plus size={16} /> Nova Ficha
+          </button>
+        </div>
       </div>
 
       <div className="relative max-w-sm">
@@ -208,31 +259,22 @@ export default function FichasTecnicas() {
                 />
               </div>
               <div className="space-y-1 text-sm mb-3">
-                <div className="flex justify-between text-slate-500">
-                  <span>Materiais:</span>
-                  <span>{ficha.itens.length} itens</span>
-                </div>
-                <div className="flex justify-between text-slate-500">
-                  <span>Custo total:</span>
-                  <strong className="text-slate-700">R$ {custo.toFixed(2)}</strong>
-                </div>
-                <div className="flex justify-between text-slate-500">
-                  <span>Preço sugerido:</span>
-                  <strong className="text-green-600">R$ {preco.toFixed(2)}</strong>
-                </div>
-                <div className="flex justify-between text-slate-500">
-                  <span>Tempo:</span>
-                  <span>{ficha.tempoProdução} min</span>
-                </div>
+                <div className="flex justify-between text-slate-500"><span>Materiais:</span><span>{ficha.itens.length} itens</span></div>
+                <div className="flex justify-between text-slate-500"><span>Custo total:</span><strong className="text-slate-700">R$ {custo.toFixed(2)}</strong></div>
+                <div className="flex justify-between text-slate-500"><span>Preço sugerido:</span><strong className="text-green-600">R$ {preco.toFixed(2)}</strong></div>
+                <div className="flex justify-between text-slate-500"><span>Tempo:</span><span>{ficha.tempoProdução} min</span></div>
               </div>
               <div className="flex gap-1 pt-3 border-t border-slate-50">
                 <button onClick={() => setModalView(ficha)} className="flex-1 text-xs text-blue-600 hover:underline">Ver ficha</button>
-                <button onClick={() => openEdit(ficha)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded">
-                  <Edit2 size={14} />
+                <button
+                  onClick={() => handleExport(ficha)}
+                  className="p-1.5 text-green-600 hover:bg-green-50 rounded"
+                  title="Exportar Excel"
+                >
+                  <Download size={14} />
                 </button>
-                <button onClick={() => deleteFichaTecnica(ficha.id)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded">
-                  <Trash2 size={14} />
-                </button>
+                <button onClick={() => openEdit(ficha)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded"><Edit2 size={14} /></button>
+                <button onClick={() => deleteFichaTecnica(ficha.id)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded"><Trash2 size={14} /></button>
               </div>
             </div>
           );
@@ -241,9 +283,136 @@ export default function FichasTecnicas() {
           <div className="col-span-full text-center py-16 text-slate-400">
             <FileText size={40} className="mx-auto mb-2 opacity-30" />
             <p>Nenhuma ficha técnica encontrada</p>
+            <p className="text-sm mt-1">Use o botão "Importar Excel" para carregar fichas existentes</p>
           </div>
         )}
       </div>
+
+      {/* ── MODAL IMPORTAR ────────────────────────────────────── */}
+      {modalImport && (
+        <Modal title="Importar Ficha Técnica do Excel" onClose={() => { setModalImport(false); resetImport(); }} size="xl">
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileSelect} />
+
+          {importStatus === 'idle' && (
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
+                <p className="font-semibold mb-1">Como funciona a importação:</p>
+                <ul className="list-disc list-inside space-y-1 text-blue-700">
+                  <li>O sistema lê o Excel e extrai o modelo, materiais e quantidades</li>
+                  <li>Materiais já existentes no estoque são vinculados automaticamente</li>
+                  <li>Materiais novos são <strong>criados automaticamente</strong> no Estoque de Insumos</li>
+                  <li>O modelo é adicionado ao <strong>Estoque de Pilotagem</strong></li>
+                  <li>A ficha técnica é criada com todos os itens vinculados</li>
+                </ul>
+              </div>
+              <p className="text-sm text-slate-500">Formatos suportados: .xlsx, .xls (mesmo formato da ficha SENAC)</p>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full border-2 border-dashed border-slate-300 rounded-xl py-12 flex flex-col items-center gap-3 text-slate-400 hover:border-blue-400 hover:text-blue-500 transition-colors"
+              >
+                <Upload size={40} />
+                <span className="font-medium">Clique para selecionar o arquivo Excel</span>
+                <span className="text-xs">ou arraste e solte aqui</span>
+              </button>
+            </div>
+          )}
+
+          {importStatus === 'parsing' && (
+            <div className="text-center py-12">
+              <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+              <p className="text-slate-600">Lendo arquivo...</p>
+            </div>
+          )}
+
+          {importStatus === 'error' && (
+            <div className="space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                <AlertCircle size={20} className="text-red-500 flex-shrink-0 mt-0.5" />
+                <p className="text-red-700 text-sm">{importError}</p>
+              </div>
+              <button onClick={resetImport} className="btn-ghost">Tentar novamente</button>
+            </div>
+          )}
+
+          {importStatus === 'done' && (
+            <div className="text-center py-12">
+              <CheckCircle size={48} className="text-green-500 mx-auto mb-3" />
+              <p className="font-semibold text-slate-800 text-lg">Importação concluída!</p>
+              <p className="text-slate-500 text-sm mt-1">Modelo e ficha técnica criados com sucesso.</p>
+            </div>
+          )}
+
+          {importStatus === 'preview' && importPreview && (
+            <div className="space-y-5">
+              {/* Header info */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-xs text-slate-400">Modelo detectado</p>
+                  <p className="font-semibold text-slate-800 text-sm mt-0.5">{importPreview.parsed.modelo}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-xs text-slate-400">Referência</p>
+                  <p className="font-semibold text-slate-800 text-sm mt-0.5">{importPreview.parsed.referencia || '—'}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-xs text-slate-400">Cliente</p>
+                  <p className="font-semibold text-slate-800 text-sm mt-0.5">{importPreview.parsed.cliente || '—'}</p>
+                </div>
+              </div>
+
+              {/* Resumo */}
+              <div className="flex gap-3">
+                <div className="flex-1 bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-green-600">{importPreview.processed.insumosResolvidos.filter(r => !r.isNovo).length}</p>
+                  <p className="text-xs text-green-700">Insumos já no sistema</p>
+                </div>
+                <div className="flex-1 bg-amber-50 border border-amber-200 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-amber-600">{importPreview.processed.insumosParaCriar.length}</p>
+                  <p className="text-xs text-amber-700">Insumos novos (serão criados)</p>
+                </div>
+                <div className="flex-1 bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-blue-600">{importPreview.parsed.itens.length}</p>
+                  <p className="text-xs text-blue-700">Total de materiais</p>
+                </div>
+              </div>
+
+              {/* Lista de materiais */}
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700 mb-2">Materiais da ficha:</h3>
+                <div className="max-h-64 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
+                  {importPreview.processed.insumosResolvidos.map((r, i) => (
+                    <div key={i} className="flex items-center gap-3 px-3 py-2">
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${r.isNovo ? 'bg-amber-400' : 'bg-green-400'}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-800 truncate">{r.insumoNome}</p>
+                        {r.isNovo && (
+                          <p className="text-xs text-amber-600 flex items-center gap-1">
+                            <Package size={10} /> Será criado como novo insumo
+                          </p>
+                        )}
+                      </div>
+                      <span className="text-sm font-medium text-slate-600 flex-shrink-0">
+                        {r.quantidade} {r.isNovo ? '' : insumos.find(i2 => i2.id === r.insumoExistenteId)?.unidade ?? ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-3 mt-2 text-xs">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-400 inline-block" /> Já existe no estoque</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Será criado</span>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                <button onClick={resetImport} className="btn-ghost">← Escolher outro arquivo</button>
+                <button onClick={confirmarImport} className="btn-primary">
+                  <CheckCircle size={16} /> Confirmar Importação
+                </button>
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
 
       {modalAdd && (
         <Modal title="Nova Ficha Técnica" onClose={() => setModalAdd(false)} size="xl">
@@ -268,8 +437,24 @@ export default function FichasTecnicas() {
       {modalView && (
         <Modal title={`Ficha Técnica — ${modelos.find(m => m.id === modalView.modeloId)?.nome}`} onClose={() => setModalView(null)} size="lg">
           <div className="space-y-4">
+            <div className="flex justify-end">
+              <button
+                onClick={() => handleExport(modalView)}
+                className="flex items-center gap-1.5 text-sm text-green-600 border border-green-200 px-3 py-1.5 rounded-lg hover:bg-green-50"
+              >
+                <Download size={14} /> Exportar Excel
+              </button>
+            </div>
             <table className="w-full text-sm">
-              <thead><tr className="bg-slate-50 text-left text-xs text-slate-500"><th className="p-2">Material</th><th className="p-2">Qtd</th><th className="p-2">Unid.</th><th className="p-2">Vlr. Unit.</th><th className="p-2">Total</th></tr></thead>
+              <thead>
+                <tr className="bg-slate-50 text-left text-xs text-slate-500">
+                  <th className="p-2">Material</th>
+                  <th className="p-2">Qtd</th>
+                  <th className="p-2">Unid.</th>
+                  <th className="p-2">Vlr. Unit.</th>
+                  <th className="p-2">Total</th>
+                </tr>
+              </thead>
               <tbody>
                 {modalView.itens.map((item, i) => {
                   const ins = insumos.find(x => x.id === item.insumoId);
