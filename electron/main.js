@@ -4,7 +4,14 @@ const fs = require('fs');
 
 const isDev = process.env.NODE_ENV === 'development';
 
-// ── Settings file (stores user preferences like data path) ──────────────────
+// Root path of the app — reliable both in dev and in packaged .exe
+const APP_ROOT = isDev
+  ? path.join(__dirname, '..')           // project root in dev
+  : path.join(process.resourcesPath, 'app'); // resources/app/ in packaged build
+
+const DIST_INDEX = path.join(APP_ROOT, 'dist', 'index.html');
+
+// ── Settings file ────────────────────────────────────────────────────────────
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 
 function loadSettings() {
@@ -60,9 +67,7 @@ ipcMain.handle('load-data', () => {
   }
 });
 
-ipcMain.handle('get-data-path', () => {
-  return getDataPath();
-});
+ipcMain.handle('get-data-path', () => getDataPath());
 
 ipcMain.handle('choose-data-dir', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
@@ -79,23 +84,16 @@ ipcMain.handle('choose-data-dir', async (event) => {
   const oldPath = getDataPath();
   const newPath = path.join(newDir, DATA_FILENAME);
 
-  // Copy existing data to new location
   try {
-    if (fs.existsSync(oldPath)) {
-      fs.copyFileSync(oldPath, newPath);
-    }
+    if (fs.existsSync(oldPath)) fs.copyFileSync(oldPath, newPath);
   } catch (err) {
     console.error('Failed to copy data:', err);
   }
 
-  // Save new setting
   const settings = loadSettings();
   settings.dataDir = newDir;
   saveSettings(settings);
-
-  // Notify renderer
   win.webContents.send('data-path-changed', newPath);
-
   return newPath;
 });
 
@@ -151,6 +149,33 @@ function createMenu() {
             });
           },
         },
+        { type: 'separator' },
+        {
+          label: 'Ferramentas do Desenvolvedor',
+          accelerator: 'Ctrl+Shift+I',
+          click: () => mainWindow?.webContents.toggleDevTools(),
+        },
+        {
+          label: 'Diagnóstico — Caminhos',
+          click: () => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'Diagnóstico',
+              message: 'Informações do aplicativo',
+              detail: [
+                `Versão: ${app.getVersion()}`,
+                `Modo: ${isDev ? 'Desenvolvimento' : 'Produção'}`,
+                `Pasta do app: ${APP_ROOT}`,
+                `Arquivo HTML: ${DIST_INDEX}`,
+                `HTML existe: ${fs.existsSync(DIST_INDEX)}`,
+                `Dados em: ${getDataPath()}`,
+                `userData: ${app.getPath('userData')}`,
+                `resourcesPath: ${process.resourcesPath}`,
+              ].join('\n'),
+              buttons: ['OK'],
+            });
+          },
+        },
       ],
     },
   ];
@@ -162,6 +187,24 @@ function createMenu() {
 // ── Window ────────────────────────────────────────────────────────────────────
 let mainWindow;
 
+function showLoadError(detail) {
+  dialog.showMessageBox({
+    type: 'error',
+    title: 'FabricaERP — Erro ao carregar',
+    message: 'Não foi possível carregar o sistema.',
+    detail: [
+      detail,
+      '',
+      `Caminho esperado: ${DIST_INDEX}`,
+      `Arquivo existe: ${fs.existsSync(DIST_INDEX)}`,
+      '',
+      'Solução: Abra o menu Ajuda > Ferramentas do Desenvolvedor (Ctrl+Shift+I)',
+      'para ver detalhes do erro no Console.',
+    ].join('\n'),
+    buttons: ['OK'],
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -172,7 +215,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      devTools: isDev,
+      devTools: true, // always allow, opened via Ctrl+Shift+I
     },
     title: 'FabricaERP',
     backgroundColor: '#f1f5f9',
@@ -186,8 +229,26 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    // Verify file exists before loading
+    if (!fs.existsSync(DIST_INDEX)) {
+      mainWindow.show();
+      showLoadError('O arquivo index.html não foi encontrado. A instalação pode estar corrompida.');
+      return;
+    }
+
+    mainWindow.loadFile(DIST_INDEX).catch(err => {
+      console.error('loadFile failed:', err);
+      showLoadError(`Erro ao carregar arquivo: ${err.message}`);
+    });
   }
+
+  // Catch failed loads (wrong path, CSP errors, etc.)
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    // -3 = ERR_ABORTED (user navigated away / reload), ignore
+    if (errorCode === -3) return;
+    console.error('did-fail-load:', errorCode, errorDescription, validatedURL);
+    showLoadError(`Erro ${errorCode}: ${errorDescription}\nURL: ${validatedURL}`);
+  });
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
