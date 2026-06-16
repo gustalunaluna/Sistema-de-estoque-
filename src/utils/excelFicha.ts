@@ -72,6 +72,10 @@ export function parseExcelFicha(buffer: ArrayBuffer): {
   modelo: string;
   referencia: string;
   cliente: string;
+  representante: string;
+  pedido: string;
+  colecao: string;
+  custoConfeccaoUnid: number;
   itens: ItemExtraido[];
   qtdFicha: number;
 } {
@@ -83,23 +87,32 @@ export function parseExcelFicha(buffer: ArrayBuffer): {
   let modeloNome = '';
   let referencia = '';
   let cliente = '';
+  let representante = '';
+  let pedido = '';
+  let colecao = '';
+  let custoConfeccaoUnid = 0;
   let qtdFicha = 1;
 
-  // Scan first 15 rows for metadata
-  for (let i = 0; i < Math.min(15, rows.length); i++) {
+  // Scan first 20 rows for metadata
+  for (let i = 0; i < Math.min(20, rows.length); i++) {
     const row = rows[i];
     const r0 = String(row[0] ?? '').trim();
     const r1 = String(row[1] ?? '').trim();
 
-    // "CLIENTE: SENAC " — starts with CLIENTE
+    // "CLIENTE: SENAC" — also check col[1] for REPRESENTANTE and col[6] for PEDIDO
     if (/^CLIENTE:/i.test(r0)) {
       cliente = r0.replace(/^CLIENTE:\s*/i, '').trim();
+      if (/REPRESENTANTE:/i.test(r1)) representante = r1.replace(/.*REPRESENTANTE:\s*/i, '').trim();
+      const r6 = String(row[6] ?? '').trim();
+      if (/PEDIDO:/i.test(r6)) pedido = r6.replace(/.*PEDIDO:\s*/i, '').trim();
     }
-    // "REF: ls : KIT SENAC - 4 PEÇAS" — starts with REF: (not REF. CLIENTE)
-    if (/^REF\s*:/i.test(r0)) {
-      referencia = r0.replace(/^REF\s*:\s*/i, '').trim();
+    // "REF: ..." or "REF. CLIENTE:" — check col[6] for COLEÇÃO
+    if (/^REF[\s.]*:/i.test(r0) || /^REF[\s.]*CLIENTE/i.test(r0)) {
+      if (/^REF\s*:/i.test(r0)) referencia = r0.replace(/^REF\s*:\s*/i, '').trim();
+      const r6 = String(row[6] ?? '').trim();
+      if (/COLE[ÇC]/i.test(r6)) colecao = r6.replace(/.*COLE[ÇC][ÃA]O:\s*/i, '').trim();
     }
-    // "MODELO: ORGANIZADOR - NECESSAIRE" in col 1
+    // "MODELO: ..." in col 1
     if (/MODELO:/i.test(r1)) {
       modeloNome = r1.replace(/.*MODELO:\s*/i, '').trim();
     }
@@ -110,6 +123,11 @@ export function parseExcelFicha(buffer: ArrayBuffer): {
     if (/QUANTIDADE.*FICHA/i.test(r0)) {
       const v = Number(row[2]);
       if (v > 0) qtdFicha = v;
+    }
+    // "CUSTO CONFECÇÃO OFICINA:" or similar
+    if (/CUSTO.*CONFEC/i.test(r0) || /CUSTO.*OFIC/i.test(r0)) {
+      const v = Number(row[2]);
+      if (v > 0) custoConfeccaoUnid = v;
     }
   }
 
@@ -174,7 +192,7 @@ export function parseExcelFicha(buffer: ArrayBuffer): {
     return true;
   });
 
-  return { modelo: modeloNome, referencia, cliente, itens, qtdFicha };
+  return { modelo: modeloNome, referencia, cliente, representante, pedido, colecao, custoConfeccaoUnid, itens, qtdFicha };
 }
 
 export interface ImportResult {
@@ -252,8 +270,15 @@ export function processarImport(
     romaneio: { oficina: '', telefone: '', dataEnvio: '', dataRetirada: '', qtdEnviada: 0, desconto: 0, totalFicha: 0, observacoes: '' },
     relatorio: { oficina: '', prazoEntrega: '', corteTecidosOk: null, corteAviamentosOk: null, retalhosTecidosOk: null, retalhosAviamentosOk: null, notaQualidade: 0, notaOrganizacao: 0, diasAtraso: 0, qtdDefeitos: 0, observacoes: '' },
     cabecalho: {
-      cliente: parsed.cliente, representante: '', pedido: '', refCliente: parsed.referencia, refMatriz: '',
-      colecao: '', qtdMostruario: 0, custoConfeccaoUnid: 0, quantidadeFicha: parsed.qtdFicha,
+      cliente: parsed.cliente,
+      representante: parsed.representante,
+      pedido: parsed.pedido,
+      refCliente: parsed.referencia,
+      refMatriz: '',
+      colecao: parsed.colecao,
+      qtdMostruario: 0,
+      custoConfeccaoUnid: parsed.custoConfeccaoUnid,
+      quantidadeFicha: parsed.qtdFicha,
       dataPedido: '', dataEntrega: '', inicioProducao: '', terminoProducao: '',
       oficina: '', telefone: '', cortador: '', qtdMoldesTotal: 0, qtdGabaritos: 0,
     },

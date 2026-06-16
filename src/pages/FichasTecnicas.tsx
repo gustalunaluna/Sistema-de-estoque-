@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useStore } from '../store/useStore';
 import type {
   FichaTecnica, ItemFichaTecnica, SecaoFicha,
-  MoldeItem, CheckListItem, TecidoCorte, AviamentoFicha, FichaCabecalho, CategoriaModelo,
+  MoldeItem, CheckListItem, FichaCabecalho, CategoriaModelo,
 } from '../types';
 import Modal from '../components/Modal';
 import Badge from '../components/Badge';
@@ -101,35 +101,14 @@ export default function FichasTecnicas() {
   const setCab = (patch: Partial<FichaCabecalho>) =>
     setForm(f => ({ ...f, cabecalho: { ...f.cabecalho, ...patch } }));
 
-  const addTecido = () =>
-    setForm(f => ({
-      ...f,
-      tecidosCorte: [...f.tecidosCorte, {
-        id: uuidv4(), descricao: '', unidade: '', variante1: '', total1: 0,
-        folhas1: 0, variante2: '', total2: 0, folhas2: 0,
-      }],
-    }));
+  const addItem = (secao: SecaoFicha) =>
+    setForm(f => ({ ...f, itens: [...f.itens, { insumoId: '', quantidade: 0, secao }] }));
 
-  const removeTecido = (id: string) =>
-    setForm(f => ({ ...f, tecidosCorte: f.tecidosCorte.filter(t => t.id !== id) }));
+  const removeItem = (idx: number) =>
+    setForm(f => ({ ...f, itens: f.itens.filter((_, i) => i !== idx) }));
 
-  const updateTecido = (id: string, patch: Partial<TecidoCorte>) =>
-    setForm(f => ({ ...f, tecidosCorte: f.tecidosCorte.map(t => t.id === id ? { ...t, ...patch } : t) }));
-
-  const addAviamento = () =>
-    setForm(f => ({
-      ...f,
-      aviamentosFicha: [...f.aviamentosFicha, {
-        id: uuidv4(), descricao: '', unidade: 0, variante: '',
-        total: 0, enviada: 0, responsavel: '', secao: aviSecao,
-      }],
-    }));
-
-  const removeAviamento = (id: string) =>
-    setForm(f => ({ ...f, aviamentosFicha: f.aviamentosFicha.filter(a => a.id !== id) }));
-
-  const updateAviamento = (id: string, patch: Partial<AviamentoFicha>) =>
-    setForm(f => ({ ...f, aviamentosFicha: f.aviamentosFicha.map(a => a.id === id ? { ...a, ...patch } : a) }));
+  const updateItem = (idx: number, patch: Partial<ItemFichaTecnica>) =>
+    setForm(f => ({ ...f, itens: f.itens.map((item, i) => i === idx ? { ...item, ...patch } : item) }));
 
   const addMolde = () =>
     setForm(f => ({
@@ -322,7 +301,6 @@ export default function FichasTecnicas() {
   // ─── FORM ────────────────────────────────────────────────────────────────────
   const FichaForm = () => {
     const valorTotal = form.cabecalho.custoConfeccaoUnid * form.cabecalho.quantidadeFicha;
-    const aviamentosSecao = form.aviamentosFicha.filter(a => a.secao === aviSecao);
 
     return (
       <div>
@@ -472,40 +450,49 @@ export default function FichasTecnicas() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-700">Ficha Corte — Tecidos</h3>
-              <button type="button" onClick={addTecido} className="text-xs text-blue-600 flex items-center gap-1 hover:underline">
+              <button type="button" onClick={() => addItem('corte')} className="text-xs text-blue-600 flex items-center gap-1 hover:underline">
                 <Plus size={12} /> Adicionar tecido
               </button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs border border-slate-200 rounded-lg overflow-hidden">
-                <thead className="bg-slate-50">
-                  <tr>
-                    {['Descrição', 'Unidade', 'Variante 1', 'Total 1', 'Folhas 1', 'Variante 2', 'Total 2', 'Folhas 2', ''].map(h => (
-                      <th key={h} className="p-2 text-left text-slate-500 font-medium whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {form.tecidosCorte.map(t => (
-                    <tr key={t.id} className="border-t border-slate-100">
-                      <td className="p-1"><input className="input text-xs w-28" value={t.descricao} onChange={e => updateTecido(t.id, { descricao: e.target.value })} /></td>
-                      <td className="p-1"><input className="input text-xs w-20" value={t.unidade} onChange={e => updateTecido(t.id, { unidade: e.target.value })} /></td>
-                      <td className="p-1"><input className="input text-xs w-24" value={t.variante1} onChange={e => updateTecido(t.id, { variante1: e.target.value })} /></td>
-                      <td className="p-1"><input type="number" className="input text-xs w-16" value={t.total1} onChange={e => updateTecido(t.id, { total1: Number(e.target.value) })} /></td>
-                      <td className="p-1"><input type="number" className="input text-xs w-16" value={t.folhas1} onChange={e => updateTecido(t.id, { folhas1: Number(e.target.value) })} /></td>
-                      <td className="p-1"><input className="input text-xs w-24" value={t.variante2} onChange={e => updateTecido(t.id, { variante2: e.target.value })} /></td>
-                      <td className="p-1"><input type="number" className="input text-xs w-16" value={t.total2} onChange={e => updateTecido(t.id, { total2: Number(e.target.value) })} /></td>
-                      <td className="p-1"><input type="number" className="input text-xs w-16" value={t.folhas2} onChange={e => updateTecido(t.id, { folhas2: Number(e.target.value) })} /></td>
-                      <td className="p-1">
-                        <button type="button" onClick={() => removeTecido(t.id)} className="text-slate-400 hover:text-red-500 p-1"><X size={12} /></button>
-                      </td>
-                    </tr>
-                  ))}
-                  {form.tecidosCorte.length === 0 && (
-                    <tr><td colSpan={9} className="p-4 text-center text-slate-400">Nenhum tecido adicionado</td></tr>
-                  )}
-                </tbody>
-              </table>
+            <div className="space-y-2">
+              {form.itens
+                .map((item, idx) => ({ item, idx }))
+                .filter(({ item }) => item.secao === 'corte')
+                .map(({ item, idx }) => {
+                  const insumo = insumos.find(ins => ins.id === item.insumoId);
+                  return (
+                    <div key={idx} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
+                      <select
+                        className="input text-xs flex-1"
+                        value={item.insumoId}
+                        onChange={e => updateItem(idx, { insumoId: e.target.value })}
+                      >
+                        <option value="">Selecionar insumo...</option>
+                        {insumos.map(ins => (
+                          <option key={ins.id} value={ins.id}>{ins.nome}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        step="0.001"
+                        className="input text-xs w-24"
+                        placeholder="Quantidade"
+                        value={item.quantidade}
+                        onChange={e => updateItem(idx, { quantidade: Number(e.target.value) })}
+                      />
+                      {insumo && <span className="text-xs text-slate-400 w-12 shrink-0">{insumo.unidade}</span>}
+                      {insumo && insumo.valorUnitario > 0 && (
+                        <span className="text-xs text-slate-500 w-20 text-right shrink-0">
+                          R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}
+                        </span>
+                      )}
+                      <button type="button" onClick={() => removeItem(idx)} className="text-slate-400 hover:text-red-500 p-1 shrink-0"><X size={12} /></button>
+                    </div>
+                  );
+                })}
+              {form.itens.filter(i => i.secao === 'corte').length === 0 && (
+                <p className="text-xs text-slate-400 text-center py-4">Nenhum tecido adicionado</p>
+              )}
             </div>
           </div>
         )}
@@ -531,39 +518,50 @@ export default function FichasTecnicas() {
 
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-700">{SECAO_LABELS[aviSecao]}</h3>
-              <button type="button" onClick={addAviamento} className="text-xs text-blue-600 flex items-center gap-1 hover:underline">
-                <Plus size={12} /> Adicionar aviamento
+              <button type="button" onClick={() => addItem(aviSecao)} className="text-xs text-blue-600 flex items-center gap-1 hover:underline">
+                <Plus size={12} /> Adicionar item
               </button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs border border-slate-200 rounded-lg overflow-hidden">
-                <thead className="bg-slate-50">
-                  <tr>
-                    {['Descrição', 'Qtd/Unid', 'Variante', 'Total', 'Enviada', 'Responsável', ''].map(h => (
-                      <th key={h} className="p-2 text-left text-slate-500 font-medium whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {aviamentosSecao.map(a => (
-                    <tr key={a.id} className="border-t border-slate-100">
-                      <td className="p-1"><input className="input text-xs w-32" value={a.descricao} onChange={e => updateAviamento(a.id, { descricao: e.target.value })} /></td>
-                      <td className="p-1"><input type="number" className="input text-xs w-16" value={a.unidade} onChange={e => updateAviamento(a.id, { unidade: Number(e.target.value) })} /></td>
-                      <td className="p-1"><input className="input text-xs w-24" value={a.variante} onChange={e => updateAviamento(a.id, { variante: e.target.value })} /></td>
-                      <td className="p-1"><input type="number" className="input text-xs w-16" value={a.total} onChange={e => updateAviamento(a.id, { total: Number(e.target.value) })} /></td>
-                      <td className="p-1"><input type="number" className="input text-xs w-16" value={a.enviada} onChange={e => updateAviamento(a.id, { enviada: Number(e.target.value) })} /></td>
-                      <td className="p-1"><input className="input text-xs w-24" value={a.responsavel} onChange={e => updateAviamento(a.id, { responsavel: e.target.value })} /></td>
-                      <td className="p-1">
-                        <button type="button" onClick={() => removeAviamento(a.id)} className="text-slate-400 hover:text-red-500 p-1"><X size={12} /></button>
-                      </td>
-                    </tr>
-                  ))}
-                  {aviamentosSecao.length === 0 && (
-                    <tr><td colSpan={7} className="p-4 text-center text-slate-400">Nenhum item nesta seção</td></tr>
-                  )}
-                </tbody>
-              </table>
+            <div className="space-y-2">
+              {form.itens
+                .map((item, idx) => ({ item, idx }))
+                .filter(({ item }) => item.secao === aviSecao)
+                .map(({ item, idx }) => {
+                  const insumo = insumos.find(ins => ins.id === item.insumoId);
+                  return (
+                    <div key={idx} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
+                      <select
+                        className="input text-xs flex-1"
+                        value={item.insumoId}
+                        onChange={e => updateItem(idx, { insumoId: e.target.value })}
+                      >
+                        <option value="">Selecionar insumo...</option>
+                        {insumos.map(ins => (
+                          <option key={ins.id} value={ins.id}>{ins.nome}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        step="0.001"
+                        className="input text-xs w-24"
+                        placeholder="Quantidade"
+                        value={item.quantidade}
+                        onChange={e => updateItem(idx, { quantidade: Number(e.target.value) })}
+                      />
+                      {insumo && <span className="text-xs text-slate-400 w-12 shrink-0">{insumo.unidade}</span>}
+                      {insumo && insumo.valorUnitario > 0 && (
+                        <span className="text-xs text-slate-500 w-20 text-right shrink-0">
+                          R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}
+                        </span>
+                      )}
+                      <button type="button" onClick={() => removeItem(idx)} className="text-slate-400 hover:text-red-500 p-1 shrink-0"><X size={12} /></button>
+                    </div>
+                  );
+                })}
+              {form.itens.filter(i => i.secao === aviSecao).length === 0 && (
+                <p className="text-xs text-slate-400 text-center py-4">Nenhum item nesta seção</p>
+              )}
             </div>
           </div>
         )}
@@ -859,7 +857,7 @@ export default function FichasTecnicas() {
                 )}
                 <div className="flex justify-between text-slate-500"><span>Materiais:</span><span>{ficha.itens.length} itens</span></div>
                 <div className="flex justify-between text-slate-500"><span>Moldes:</span><span>{ficha.moldes.length}</span></div>
-                <div className="flex justify-between text-slate-500"><span>Tecidos:</span><span>{(ficha.tecidosCorte ?? []).length}</span></div>
+                <div className="flex justify-between text-slate-500"><span>Tecidos:</span><span>{ficha.itens.filter(i => i.secao === 'corte').length}</span></div>
               </div>
               <div className="flex gap-1 pt-3 border-t border-slate-50">
                 <button onClick={() => openView(ficha)} className="flex-1 text-xs text-blue-600 hover:underline">Ver ficha</button>
@@ -1110,33 +1108,29 @@ export default function FichasTecnicas() {
 
               {/* View: Tecidos */}
               {viewTab === 'tecidos' && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs border border-slate-200 rounded-lg overflow-hidden">
-                    <thead className="bg-slate-50">
-                      <tr>
-                        {['Descrição', 'Unidade', 'Variante 1', 'Total 1', 'Folhas 1', 'Variante 2', 'Total 2', 'Folhas 2'].map(h => (
-                          <th key={h} className="p-2 text-left text-slate-500 font-medium whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(modalView.tecidosCorte ?? []).map(t => (
-                        <tr key={t.id} className="border-t border-slate-100">
-                          <td className="p-2">{t.descricao || '—'}</td>
-                          <td className="p-2">{t.unidade || '—'}</td>
-                          <td className="p-2">{t.variante1 || '—'}</td>
-                          <td className="p-2">{t.total1}</td>
-                          <td className="p-2">{t.folhas1}</td>
-                          <td className="p-2">{t.variante2 || '—'}</td>
-                          <td className="p-2">{t.total2}</td>
-                          <td className="p-2">{t.folhas2}</td>
-                        </tr>
-                      ))}
-                      {(modalView.tecidosCorte ?? []).length === 0 && (
-                        <tr><td colSpan={8} className="p-4 text-center text-slate-400">Nenhum tecido cadastrado</td></tr>
-                      )}
-                    </tbody>
-                  </table>
+                <div className="space-y-2">
+                  {modalView.itens.filter(i => i.secao === 'corte').length === 0 && (
+                    <p className="text-center py-6 text-slate-400 text-sm">Nenhum tecido cadastrado</p>
+                  )}
+                  {modalView.itens
+                    .filter(i => i.secao === 'corte')
+                    .map((item, idx) => {
+                      const insumo = insumos.find(ins => ins.id === item.insumoId);
+                      return (
+                        <div key={idx} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-slate-700">{insumo?.nome ?? '—'}</p>
+                            <p className="text-xs text-slate-400">{insumo?.codigo} · {insumo?.categoria}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-medium text-slate-700">{item.quantidade} {insumo?.unidade ?? ''}</p>
+                            {insumo && insumo.valorUnitario > 0 && (
+                              <p className="text-xs text-slate-400">R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                 </div>
               )}
 
@@ -1144,34 +1138,34 @@ export default function FichasTecnicas() {
               {viewTab === 'aviamentos' && (
                 <div className="space-y-3">
                   {(['aviamentos', 'acabamento', 'cliente', 'travetes'] as AviSecao[]).map(secao => {
-                    const items = (modalView.aviamentosFicha ?? []).filter(a => a.secao === secao);
+                    const items = modalView.itens.filter(i => i.secao === secao);
                     return (
                       <div key={secao} className="border border-slate-200 rounded-lg overflow-hidden">
-                        <div className="bg-purple-50 px-4 py-2 text-xs font-semibold text-purple-700 uppercase tracking-wide">{SECAO_LABELS[secao]}</div>
-                        <table className="w-full text-xs">
-                          <thead className="bg-slate-50">
-                            <tr>
-                              {['Descrição', 'Qtd/Unid', 'Variante', 'Total', 'Enviada', 'Responsável'].map(h => (
-                                <th key={h} className="p-2 text-left text-slate-500 font-medium">{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {items.map(a => (
-                              <tr key={a.id} className="border-t border-slate-50">
-                                <td className="p-2">{a.descricao || '—'}</td>
-                                <td className="p-2">{a.unidade}</td>
-                                <td className="p-2">{a.variante || '—'}</td>
-                                <td className="p-2">{a.total}</td>
-                                <td className="p-2">{a.enviada}</td>
-                                <td className="p-2">{a.responsavel || '—'}</td>
-                              </tr>
-                            ))}
-                            {items.length === 0 && (
-                              <tr><td colSpan={6} className="p-4 text-center text-slate-400">Nenhum item nesta seção</td></tr>
-                            )}
-                          </tbody>
-                        </table>
+                        <div className="bg-purple-50 px-4 py-2 text-xs font-semibold text-purple-700 uppercase tracking-wide">
+                          {SECAO_LABELS[secao]}
+                        </div>
+                        <div className="divide-y divide-slate-50">
+                          {items.map((item, idx) => {
+                            const insumo = insumos.find(ins => ins.id === item.insumoId);
+                            return (
+                              <div key={idx} className="flex items-center justify-between px-3 py-2">
+                                <div className="flex-1">
+                                  <p className="text-sm text-slate-700">{insumo?.nome ?? '—'}</p>
+                                  <p className="text-xs text-slate-400">{insumo?.codigo}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-sm font-medium text-slate-600">{item.quantidade} {insumo?.unidade ?? ''}</p>
+                                  {insumo && insumo.valorUnitario > 0 && (
+                                    <p className="text-xs text-slate-400">R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}</p>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {items.length === 0 && (
+                            <p className="p-4 text-center text-xs text-slate-400">Nenhum item nesta seção</p>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
