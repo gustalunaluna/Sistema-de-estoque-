@@ -24,11 +24,13 @@ export function isElectron(): boolean {
   return typeof window !== 'undefined' && !!window.electronAPI;
 }
 
-// Cache API availability so we don't check on every save
+// Cache API availability; re-check after 60 s so a slow server start is recovered
 let _apiAvailable: boolean | null = null;
+let _apiCheckedAt = 0;
 
 async function isApiAvailable(): Promise<boolean> {
-  if (_apiAvailable !== null) return _apiAvailable;
+  const now = Date.now();
+  if (_apiAvailable !== null && now - _apiCheckedAt < 60_000) return _apiAvailable;
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 2000);
@@ -38,6 +40,7 @@ async function isApiAvailable(): Promise<boolean> {
   } catch {
     _apiAvailable = false;
   }
+  _apiCheckedAt = Date.now();
   return _apiAvailable;
 }
 
@@ -58,30 +61,40 @@ async function apiSave(value: string): Promise<void> {
 }
 
 export const appStorage = {
-  getItem: async (_name: string): Promise<string | null> => {
+  getItem: async (name: string): Promise<string | null> => {
     if (isElectron()) return window.electronAPI!.loadData();
 
     if (await isApiAvailable()) {
-      try { return await apiLoad(); } catch { /* fall through */ }
+      try {
+        const apiData = await apiLoad();
+        if (apiData !== null) {
+          // Keep localStorage in sync so data survives server restarts
+          try { localStorage.setItem(name, apiData); } catch (_) {}
+          return apiData;
+        }
+      } catch { /* fall through to localStorage */ }
     }
-    return localStorage.getItem('fabrica-erp-backup');
+    // Offline or API returned nothing — use localStorage
+    return localStorage.getItem(name);
   },
 
-  setItem: async (_name: string, value: string): Promise<void> => {
+  setItem: async (name: string, value: string): Promise<void> => {
     if (isElectron()) {
       await window.electronAPI!.saveData(value);
       return;
     }
 
+    // Persist to localStorage first (synchronous, never fails silently)
+    try { localStorage.setItem(name, value); } catch (_) {}
+
+    // Then also save to API for cross-device access
     if (await isApiAvailable()) {
-      try { await apiSave(value); } catch { /* fall through */ }
+      try { await apiSave(value); } catch { /* localStorage already has it */ }
     }
-    // Always keep a localStorage copy as emergency backup
-    try { localStorage.setItem('fabrica-erp-backup', value); } catch (_) {}
   },
 
-  removeItem: async (_name: string): Promise<void> => {
-    localStorage.removeItem('fabrica-erp-backup');
+  removeItem: async (name: string): Promise<void> => {
+    localStorage.removeItem(name);
   },
 };
 
