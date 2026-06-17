@@ -1,7 +1,10 @@
-// Storage adapter — supports three modes:
+// Storage adapter — supports four modes (in priority order):
 //  1. Electron desktop app  (window.electronAPI available)
-//  2. Web server mode       (Express API at /api/data)
-//  3. Dev / offline fallback (localStorage)
+//  2. Supabase cloud        (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY configured)
+//  3. Express server        (Express API at /api/data, running on localhost:3000)
+//  4. localStorage fallback (offline / dev without server)
+
+import { getSupabase, isSupabaseConfigured } from './supabase';
 
 export interface BackupInfo {
   filename: string;
@@ -41,11 +44,45 @@ export function isElectron(): boolean {
   return typeof window !== 'undefined' && !!window.electronAPI;
 }
 
+// ── Supabase helpers ──────────────────────────────────────────────────────────
+
+const SUPABASE_ROW_ID = 'main';
+
+async function supabaseLoad(): Promise<string | null> {
+  const sb = getSupabase();
+  if (!sb) return null;
+  const { data, error } = await sb
+    .from('erp_data')
+    .select('data')
+    .eq('id', SUPABASE_ROW_ID)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  // data.data is jsonb (object); Zustand expects a JSON string
+  return typeof data.data === 'string' ? data.data : JSON.stringify(data.data);
+}
+
+async function supabaseSave(value: string): Promise<void> {
+  const sb = getSupabase();
+  if (!sb) return;
+  const { error } = await sb
+    .from('erp_data')
+    .upsert(
+      { id: SUPABASE_ROW_ID, data: JSON.parse(value), updated_at: new Date().toISOString() },
+      { onConflict: 'id' },
+    );
+  if (error) throw new Error(error.message);
+}
+
+// ── Express API helpers ───────────────────────────────────────────────────────
+
 // Cache API availability; re-check after 60 s so a slow server start is recovered
 let _apiAvailable: boolean | null = null;
 let _apiCheckedAt = 0;
 
 async function isApiAvailable(): Promise<boolean> {
+  // Never use the Express API when Supabase is configured
+  if (isSupabaseConfigured()) return false;
   const now = Date.now();
   if (_apiAvailable !== null && now - _apiCheckedAt < 60_000) return _apiAvailable;
   try {
@@ -77,10 +114,26 @@ async function apiSave(value: string): Promise<void> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
+// ── Unified storage object (used by Zustand persist middleware) ───────────────
+
 export const appStorage = {
   getItem: async (name: string): Promise<string | null> => {
+    // 1. Electron
     if (isElectron()) return window.electronAPI!.loadData();
 
+    // 2. Supabase cloud
+    if (isSupabaseConfigured()) {
+      try {
+        const cloudData = await supabaseLoad();
+        if (cloudData !== null) {
+          try { localStorage.setItem(name, cloudData); } catch (_) {}
+          return cloudData;
+        }
+      } catch { /* fall through to localStorage */ }
+      return localStorage.getItem(name);
+    }
+
+    // 3. Express server
     if (await isApiAvailable()) {
       try {
         const apiData = await apiLoad();
@@ -90,17 +143,28 @@ export const appStorage = {
         }
       } catch { /* fall through to localStorage */ }
     }
+
+    // 4. localStorage
     return localStorage.getItem(name);
   },
 
   setItem: async (name: string, value: string): Promise<void> => {
+    // 1. Electron
     if (isElectron()) {
       await window.electronAPI!.saveData(value);
       return;
     }
-    // Persist to localStorage first (synchronous, never fails silently)
+
+    // Always write to localStorage as local cache
     try { localStorage.setItem(name, value); } catch (_) {}
-    // Then also save to API for cross-device access
+
+    // 2. Supabase cloud
+    if (isSupabaseConfigured()) {
+      try { await supabaseSave(value); } catch { /* localStorage already has it */ }
+      return;
+    }
+
+    // 3. Express server
     if (await isApiAvailable()) {
       try { await apiSave(value); } catch { /* localStorage already has it */ }
     }
@@ -115,6 +179,7 @@ export const appStorage = {
 
 export async function getDataPath(): Promise<string> {
   if (isElectron()) return window.electronAPI!.getDataPath();
+  if (isSupabaseConfigured()) return 'Supabase (nuvem)';
   try {
     const res = await fetch('/api/health');
     const json = await res.json();
@@ -126,6 +191,7 @@ export async function getDataPath(): Promise<string> {
 
 export async function getErpRoot(): Promise<string> {
   if (isElectron()) return window.electronAPI!.getErpRoot();
+  if (isSupabaseConfigured()) return 'Supabase';
   try {
     const res = await fetch('/api/settings/datadir');
     const json = await res.json();
