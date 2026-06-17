@@ -23,7 +23,7 @@ function downloadBlob(blob: Blob, filename: string) {
  * In Electron: calls main process via IPC → save dialog.
  * In web mode: calls /api/export-ficha → browser download.
  */
-export async function exportarFichaTemplate(payload: ExportPayload): Promise<{ ok: boolean; error?: string }> {
+export async function exportarFichaTemplate(payload: ExportPayload): Promise<{ ok: boolean; canceled?: boolean; error?: string }> {
   if (isElectron() && window.electronAPI?.exportFichaExcel) {
     const result = await window.electronAPI.exportFichaExcel(payload);
     return result;

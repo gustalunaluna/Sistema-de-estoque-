@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Plus, Search, Edit2, Trash2, FileText, X, Upload, Download, CheckCircle, AlertCircle, Package, Printer, FileDown, History, ChevronDown } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, FileText, X, Upload, Download, CheckCircle, AlertCircle, Package, Printer, FileDown, History } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { useStore } from '../store/useStore';
 import type {
@@ -69,7 +69,7 @@ export default function FichasTecnicas() {
   const store = useStore();
   const {
     fichasTecnicas, addFichaTecnica, updateFichaTecnica, deleteFichaTecnica,
-    modelos, insumos, addInsumo, addModelo, clientes,
+    modelos, insumos, addInsumo, addModelo,
   } = store;
 
   const [search, setSearch] = useState('');
