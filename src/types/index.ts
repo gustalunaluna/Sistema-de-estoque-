@@ -190,6 +190,7 @@ export interface ExporteHistorico {
 export interface FichaTecnica {
   id: string;
   modeloId: string;
+  imagemReferencia?: string;
   itens: ItemFichaTecnica[];
   tempoProdução: number;
   custoMaoDeObra: number;

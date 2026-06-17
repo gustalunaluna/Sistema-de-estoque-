@@ -1,5 +1,6 @@
 import { useState, useRef, Fragment } from 'react';
-import { Plus, Search, Edit2, Trash2, FileText, X, Upload, Download, CheckCircle, AlertCircle, Package, Printer, FileDown, History, Scissors } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, FileText, X, Upload, Download, CheckCircle, AlertCircle, Package, Printer, FileDown, History, Scissors, Image } from 'lucide-react';
+import ImageUpload from '../components/ImageUpload';
 import { v4 as uuidv4 } from 'uuid';
 import { useStore } from '../store/useStore';
 import type {
@@ -41,6 +42,7 @@ type FormState = Omit<FichaTecnica, 'id' | 'criadoEm' | 'atualizadoEm'> & {
 
 const emptyForm = (modeloId = ''): FormState => ({
   modeloId,
+  imagemReferencia: undefined,
   itens: [],
   tempoProdução: 0,
   custoMaoDeObra: 0,
@@ -413,6 +415,31 @@ export default function FichasTecnicas() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Imagem de referência */}
+            <div className="border border-slate-200 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-medium text-slate-600 flex items-center gap-1.5">
+                <Image size={13} className="text-slate-400" />
+                Imagem de referência <span className="font-normal text-slate-400">(aparece na impressão)</span>
+              </p>
+              <div className="flex items-start gap-5">
+                <ImageUpload
+                  value={form.imagemReferencia}
+                  onChange={v => setForm(f => ({ ...f, imagemReferencia: v }))}
+                  label=""
+                />
+                {/* Preview da foto do modelo, se a ficha não tiver imagem própria */}
+                {!form.imagemReferencia && (() => {
+                  const m = modelos.find(m => m.id === form.modeloId);
+                  return m?.fotoPrincipal ? (
+                    <div>
+                      <p className="text-xs text-slate-400 mb-1">Foto do modelo (usada se não houver imagem da ficha)</p>
+                      <img src={m.fotoPrincipal} alt={m.nome} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
+                    </div>
+                  ) : null;
+                })()}
+              </div>
             </div>
 
             {/* Cabeçalho fields */}
@@ -1024,10 +1051,24 @@ export default function FichasTecnicas() {
           const cab = ficha.cabecalho;
           return (
             <div key={ficha.id} className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <p className="font-semibold text-slate-800">{modelo.nome}</p>
-                  <p className="text-xs text-slate-400">{modelo.codigo}</p>
+              <div className="flex items-start justify-between mb-3 gap-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  {/* Thumbnail: imagem da ficha ou do modelo */}
+                  {(ficha.imagemReferencia || modelo.fotoPrincipal) ? (
+                    <img
+                      src={ficha.imagemReferencia || modelo.fotoPrincipal}
+                      alt={modelo.nome}
+                      className="w-12 h-12 object-cover rounded-lg border border-slate-200 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-lg border border-dashed border-slate-200 bg-slate-50 flex items-center justify-center shrink-0">
+                      <Image size={16} className="text-slate-300" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-800 truncate">{modelo.nome}</p>
+                    <p className="text-xs text-slate-400">{modelo.codigo}</p>
+                  </div>
                 </div>
                 <Badge
                   label={modelo.status.charAt(0).toUpperCase() + modelo.status.slice(1)}
@@ -1269,6 +1310,28 @@ export default function FichasTecnicas() {
               {/* View: Cabeçalho */}
               {viewTab === 'cabecalho' && (
                 <div className="space-y-3">
+                  {/* Imagem de referência */}
+                  {(() => {
+                    const viewModelo = modelos.find(m => m.id === modalView.modeloId);
+                    const imgSrc = modalView.imagemReferencia || viewModelo?.fotoPrincipal;
+                    return imgSrc ? (
+                      <div className="flex items-start gap-4 bg-slate-50 rounded-lg p-3 border border-slate-200">
+                        <img
+                          src={imgSrc}
+                          alt="Referência"
+                          className="h-28 w-28 object-contain rounded-lg border border-slate-200 bg-white"
+                        />
+                        <div className="flex-1 text-sm">
+                          <p className="text-xs text-slate-400 mb-1">Imagem de referência</p>
+                          <p className="font-medium text-slate-700">{viewModelo?.nome}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">{viewModelo?.codigo}</p>
+                          {modalView.imagemReferencia && viewModelo?.fotoPrincipal && modalView.imagemReferencia !== viewModelo.fotoPrincipal && (
+                            <p className="text-xs text-blue-500 mt-1">Imagem específica da ficha</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
                   <div className="grid grid-cols-3 gap-3 text-sm">
                     {[
                       ['Cliente', cab.cliente],
@@ -1736,37 +1799,56 @@ export default function FichasTecnicas() {
             {/* Print content */}
             <div id="ficha-print-area" className="text-slate-800 bg-white">
               {/* Title */}
-              <div className="border-2 border-slate-800 rounded-t-lg overflow-hidden mb-3">
-                <div className="bg-slate-800 text-white text-center py-2.5 font-bold tracking-widest text-sm uppercase">
-                  Ficha Técnica de Produção &nbsp;|&nbsp; v{pFicha.versao ?? 1}
-                </div>
-                <div className="grid grid-cols-2 divide-x divide-slate-200">
-                  <table className="p-3 w-full">
-                    <tbody>
-                      <PrintRow label="Modelo:" value={pModelo.nome} />
-                      <PrintRow label="Código:" value={pModelo.codigo} />
-                      <PrintRow label="Cliente:" value={cab.cliente ?? ''} />
-                      <PrintRow label="Representante:" value={cab.representante ?? ''} />
-                      <PrintRow label="Pedido:" value={cab.pedido ?? ''} />
-                      <PrintRow label="Ref. Cliente:" value={cab.refCliente ?? ''} />
-                      <PrintRow label="Ref. Matriz:" value={cab.refMatriz ?? ''} />
-                      <PrintRow label="Coleção:" value={cab.colecao ?? ''} />
-                    </tbody>
-                  </table>
-                  <table className="p-3 w-full">
-                    <tbody>
-                      <PrintRow label="Data Pedido:" value={cab.dataPedido ?? ''} />
-                      <PrintRow label="Data Entrega:" value={cab.dataEntrega ?? ''} />
-                      <PrintRow label="Início Produção:" value={cab.inicioProducao ?? ''} />
-                      <PrintRow label="Término Produção:" value={cab.terminoProducao ?? ''} />
-                      <PrintRow label="Quantidade Ficha:" value={cab.quantidadeFicha ?? 0} />
-                      <PrintRow label="Custo Confecção/un:" value={`R$ ${(cab.custoConfeccaoUnid ?? 0).toFixed(2)}`} />
-                      <PrintRow label="Valor Total Ficha:" value={`R$ ${valorTotal.toFixed(2)}`} />
-                      <PrintRow label="Oficina:" value={cab.oficina ?? ''} />
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              {(() => {
+                const printImg = pFicha.imagemReferencia || pModelo?.fotoPrincipal;
+                return (
+                  <div className="border-2 border-slate-800 rounded-t-lg overflow-hidden mb-3">
+                    <div className="bg-slate-800 text-white text-center py-2.5 font-bold tracking-widest text-sm uppercase">
+                      Ficha Técnica de Produção &nbsp;|&nbsp; v{pFicha.versao ?? 1}
+                    </div>
+                    <div
+                      className="grid divide-x divide-slate-200"
+                      style={{ gridTemplateColumns: printImg ? '1fr 1fr 120px' : '1fr 1fr' }}
+                    >
+                      <table className="p-3 w-full">
+                        <tbody>
+                          <PrintRow label="Modelo:" value={pModelo.nome} />
+                          <PrintRow label="Código:" value={pModelo.codigo} />
+                          <PrintRow label="Cliente:" value={cab.cliente ?? ''} />
+                          <PrintRow label="Representante:" value={cab.representante ?? ''} />
+                          <PrintRow label="Pedido:" value={cab.pedido ?? ''} />
+                          <PrintRow label="Ref. Cliente:" value={cab.refCliente ?? ''} />
+                          <PrintRow label="Ref. Matriz:" value={cab.refMatriz ?? ''} />
+                          <PrintRow label="Coleção:" value={cab.colecao ?? ''} />
+                        </tbody>
+                      </table>
+                      <table className="p-3 w-full">
+                        <tbody>
+                          <PrintRow label="Data Pedido:" value={cab.dataPedido ?? ''} />
+                          <PrintRow label="Data Entrega:" value={cab.dataEntrega ?? ''} />
+                          <PrintRow label="Início Produção:" value={cab.inicioProducao ?? ''} />
+                          <PrintRow label="Término Produção:" value={cab.terminoProducao ?? ''} />
+                          <PrintRow label="Quantidade Ficha:" value={cab.quantidadeFicha ?? 0} />
+                          <PrintRow label="Custo Confecção/un:" value={`R$ ${(cab.custoConfeccaoUnid ?? 0).toFixed(2)}`} />
+                          <PrintRow label="Valor Total Ficha:" value={`R$ ${valorTotal.toFixed(2)}`} />
+                          <PrintRow label="Oficina:" value={cab.oficina ?? ''} />
+                        </tbody>
+                      </table>
+                      {printImg && (
+                        <div className="flex flex-col items-center justify-center p-2 bg-slate-50 gap-1">
+                          <img
+                            src={printImg}
+                            alt="Referência"
+                            className="max-h-28 max-w-full object-contain"
+                            style={{ imageRendering: 'auto' }}
+                          />
+                          <span className="text-[9px] text-slate-400 text-center leading-tight">Referência</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Materials */}
               <MatSection title="Divisão de Tecidos — Corte" color="bg-blue-700"    items={pTecidos} />
