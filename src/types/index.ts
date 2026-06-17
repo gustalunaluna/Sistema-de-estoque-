@@ -170,6 +170,12 @@ export interface AviamentoFicha {
   secao: 'aviamentos' | 'acabamento' | 'cliente' | 'travetes';
 }
 
+export interface ExporteHistorico {
+  data: string;
+  versao: number;
+  tipo: 'excel' | 'pdf' | 'impressao';
+}
+
 export interface FichaTecnica {
   id: string;
   modeloId: string;
@@ -185,6 +191,8 @@ export interface FichaTecnica {
   cabecalho: FichaCabecalho;
   tecidosCorte: TecidoCorte[];
   aviamentosFicha: AviamentoFicha[];
+  versao: number;
+  historicoExportes: ExporteHistorico[];
   criadoEm: string;
   atualizadoEm: string;
 }

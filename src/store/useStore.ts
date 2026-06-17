@@ -249,6 +249,8 @@ export const useStore = create<AppState>()(
           cabecalho: data.cabecalho ?? DEFAULT_CABECALHO(),
           tecidosCorte: data.tecidosCorte ?? [],
           aviamentosFicha: data.aviamentosFicha ?? [],
+          versao: data.versao ?? 1,
+          historicoExportes: data.historicoExportes ?? [],
           criadoEm: now(),
           atualizadoEm: now(),
         };

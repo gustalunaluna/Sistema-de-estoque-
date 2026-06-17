@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { exportarFichaExcel } = require('./export-ficha');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -114,6 +115,22 @@ app.post('/api/settings/datadir', (req, res) => {
     }
     res.json({ ok: true, dataFile: newPath });
   } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── Export Ficha Técnica (template-based Excel) ───────────────────────────────
+app.post('/api/export-ficha', async (req, res) => {
+  try {
+    const { ficha, modelo, insumos, versao } = req.body;
+    if (!ficha || !modelo) return res.status(400).json({ ok: false, error: 'Dados insuficientes.' });
+    const buffer = await exportarFichaExcel({ ficha, modelo, insumos: insumos || [], versao: versao || 1 });
+    const filename = `FichaTecnica_${(modelo.codigo || modelo.nome).replace(/[^a-zA-Z0-9-_]/g, '_')}_v${versao || 1}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error('Erro ao exportar ficha:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

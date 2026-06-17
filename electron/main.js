@@ -313,6 +313,29 @@ ipcMain.handle('set-auto-backup', (_event, enabled) => {
 ipcMain.handle('get-version', () => app.getVersion());
 ipcMain.handle('open-in-explorer', (_event, filePath) => shell.showItemInFolder(filePath));
 
+// ── Export Ficha Técnica (template-based Excel) ───────────────────────────────
+ipcMain.handle('export-ficha-excel', async (_event, { ficha, modelo, insumos, versao }) => {
+  try {
+    const { exportarFichaExcel } = require(path.join(__dirname, '..', 'server', 'export-ficha.js'));
+    const buffer = await exportarFichaExcel({ ficha, modelo, insumos: insumos || [], versao: versao || 1 });
+    const filename = `FichaTecnica_${(modelo.codigo || modelo.nome).replace(/[^a-zA-Z0-9-_]/g, '_')}_v${versao || 1}.xlsx`;
+    const defaultPath = path.join(getErpRoot(), 'arquivos', 'documentos', filename);
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: 'Salvar Ficha Técnica',
+      defaultPath,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, buffer);
+    shell.showItemInFolder(filePath);
+    return { ok: true, filePath };
+  } catch (err) {
+    log('Erro ao exportar ficha:', err.message);
+    return { ok: false, error: err.message };
+  }
+});
+
 // ── Menu ──────────────────────────────────────────────────────────────────────
 let mainWindow;
 

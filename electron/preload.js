@@ -39,4 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Misc ───────────────────────────────────────────────────────────────────
   getVersion: () => ipcRenderer.invoke('get-version'),
   openInExplorer: (filePath) => ipcRenderer.invoke('open-in-explorer', filePath),
+
+  // ── Export Ficha Técnica ───────────────────────────────────────────────────
+  exportFichaExcel: (data) => ipcRenderer.invoke('export-ficha-excel', data),
 });
