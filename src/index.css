@@ -50,6 +50,40 @@ body {
     padding: 12mm !important;
     background: white !important;
     font-size: 10pt !important;
+    /* Force the browser to actually print backgrounds/colors */
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+  /* Propagate color-adjust to all descendants */
+  #ficha-print-area * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  /* Convert every colored section header to black/white */
+  #ficha-print-area .bg-blue-700,
+  #ficha-print-area .bg-orange-600,
+  #ficha-print-area .bg-teal-600,
+  #ficha-print-area .bg-violet-600,
+  #ficha-print-area .bg-rose-600,
+  #ficha-print-area .bg-slate-600,
+  #ficha-print-area .bg-slate-700,
+  #ficha-print-area .bg-slate-800 {
+    background-color: #111827 !important;
+    color: #ffffff !important;
+  }
+  /* Light alternating row backgrounds */
+  #ficha-print-area .bg-slate-50 {
+    background-color: #f9fafb !important;
+  }
+  /* Ensure all cell borders print */
+  #ficha-print-area table {
+    border-collapse: collapse !important;
+  }
+  /* Keep each section together to avoid awkward mid-section page breaks */
+  #ficha-print-area .mb-3 {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
   @page { margin: 10mm; size: A4 portrait; }
 }

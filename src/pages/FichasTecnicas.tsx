@@ -1622,7 +1622,7 @@ export default function FichasTecnicas() {
           if (items.length === 0) return null;
           return (
             <div className="mb-3">
-              <div className={`${color} text-white text-xs font-bold px-3 py-1.5 uppercase tracking-wider`}>{title}</div>
+              <div className={`${color} print:bg-gray-900 text-white text-xs font-bold px-3 py-1.5 uppercase tracking-wider`}>{title}</div>
               <table className="w-full text-xs border border-slate-200 border-t-0">
                 <thead className="bg-slate-50">
                   <tr>
@@ -1753,7 +1753,7 @@ export default function FichasTecnicas() {
               {/* Moldes */}
               {pFicha.moldes.length > 0 && (
                 <div className="mb-3">
-                  <div className="bg-slate-600 text-white text-xs font-bold px-3 py-1.5 uppercase tracking-wider">
+                  <div className="bg-slate-600 print:bg-gray-900 text-white text-xs font-bold px-3 py-1.5 uppercase tracking-wider">
                     Moldes — {pFicha.moldes.length} peça{pFicha.moldes.length !== 1 ? 's' : ''}
                   </div>
                   <table className="w-full text-xs border border-slate-200 border-t-0">
@@ -1777,6 +1777,101 @@ export default function FichasTecnicas() {
                   </table>
                 </div>
               )}
+
+              {/* Romaneio */}
+              <div className="mb-3">
+                <div className="bg-slate-800 print:bg-gray-900 text-white text-xs font-bold px-3 py-1.5 uppercase tracking-wider">
+                  Romaneio de Produção
+                </div>
+                <table className="w-full text-xs border border-slate-200 border-t-0">
+                  <tbody>
+                    <tr className="bg-white">
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100 w-28">Oficina</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">{pFicha.romaneio.oficina || '—'}</td>
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100 w-28">Telefone</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">{pFicha.romaneio.telefone || '—'}</td>
+                    </tr>
+                    <tr className="bg-slate-50/50">
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Data Envio</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">{pFicha.romaneio.dataEnvio || '—'}</td>
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Data Retirada</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">{pFicha.romaneio.dataRetirada || '—'}</td>
+                    </tr>
+                    <tr className="bg-white">
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Qtd Enviada</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">{pFicha.romaneio.qtdEnviada}</td>
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Descontos</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">R$ {pFicha.romaneio.desconto.toFixed(2)}</td>
+                    </tr>
+                    <tr className="bg-slate-50/50">
+                      <td className="p-1.5 font-semibold text-slate-500">Total Ficha</td>
+                      <td className="p-1.5 font-bold text-slate-800">R$ {pFicha.romaneio.totalFicha.toFixed(2)}</td>
+                      <td colSpan={2} />
+                    </tr>
+                    {pFicha.romaneio.observacoes ? (
+                      <tr className="bg-white">
+                        <td className="p-1.5 font-semibold text-slate-500 border-t border-slate-100">Observações</td>
+                        <td className="p-1.5 text-slate-800 border-t border-slate-100" colSpan={3}>{pFicha.romaneio.observacoes}</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Relatório */}
+              <div className="mb-3">
+                <div className="bg-slate-800 print:bg-gray-900 text-white text-xs font-bold px-3 py-1.5 uppercase tracking-wider">
+                  Relatório de Produção
+                </div>
+                <table className="w-full text-xs border border-slate-200 border-t-0">
+                  <tbody>
+                    <tr className="bg-white">
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100 w-28">Oficina</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">{pFicha.relatorio.oficina || '—'}</td>
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100 w-28">Prazo Entrega</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">{pFicha.relatorio.prazoEntrega || '—'}</td>
+                    </tr>
+                    <tr className="bg-slate-50/50">
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Nota Qualidade</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">{pFicha.relatorio.notaQualidade}/10</td>
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Nota Organização</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">{pFicha.relatorio.notaOrganizacao}/10</td>
+                    </tr>
+                    <tr className="bg-white">
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Corte Tecidos</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">
+                        {pFicha.relatorio.corteTecidosOk === true ? 'OK' : pFicha.relatorio.corteTecidosOk === false ? 'NOK' : 'N/A'}
+                      </td>
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Corte Aviamentos</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">
+                        {pFicha.relatorio.corteAviamentosOk === true ? 'OK' : pFicha.relatorio.corteAviamentosOk === false ? 'NOK' : 'N/A'}
+                      </td>
+                    </tr>
+                    <tr className="bg-slate-50/50">
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Retalhos Tecidos</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">
+                        {pFicha.relatorio.retalhosTecidosOk === true ? 'OK' : pFicha.relatorio.retalhosTecidosOk === false ? 'NOK' : 'N/A'}
+                      </td>
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Retalhos Aviamentos</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">
+                        {pFicha.relatorio.retalhosAviamentosOk === true ? 'OK' : pFicha.relatorio.retalhosAviamentosOk === false ? 'NOK' : 'N/A'}
+                      </td>
+                    </tr>
+                    <tr className="bg-white">
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Dias Atraso</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">{pFicha.relatorio.diasAtraso}</td>
+                      <td className="p-1.5 font-semibold text-slate-500 border-b border-slate-100">Qtd Defeitos</td>
+                      <td className="p-1.5 text-slate-800 border-b border-slate-100">{pFicha.relatorio.qtdDefeitos}</td>
+                    </tr>
+                    {pFicha.relatorio.observacoes ? (
+                      <tr className="bg-slate-50/50">
+                        <td className="p-1.5 font-semibold text-slate-500 border-t border-slate-100">Observações</td>
+                        <td className="p-1.5 text-slate-800 border-t border-slate-100" colSpan={3}>{pFicha.relatorio.observacoes}</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
 
               {/* Footer */}
               <div className="text-xs text-slate-400 text-center border-t border-slate-200 pt-2 mt-2">
