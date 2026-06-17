@@ -1,4 +1,4 @@
-import type { Insumo, CategoriaInsumo, GrupoPrincipal } from '../types';
+import type { Insumo, CategoriaInsumo, GrupoPrincipal, CorteItem, UnidadeCorte } from '../types';
 
 export const GRUPO_LABELS: Record<GrupoPrincipal, string> = {
   aviamentos: 'Aviamentos',
@@ -41,4 +41,20 @@ export function getGrupoInsumo(i: Insumo): GrupoPrincipal {
 export function getSubcategoriaInsumo(i: Insumo): string {
   if (i.subcategoria) return i.subcategoria;
   return CATEGORIA_PARA_SUBCATEGORIA[i.categoria] ?? 'Outros';
+}
+
+export function suportaCortes(insumo: Insumo): boolean {
+  return insumo.unidade === 'metro';
+}
+
+export function corteToMetros(tamanho: number, unidade: UnidadeCorte): number {
+  switch (unidade) {
+    case 'm': return tamanho;
+    case 'cm': return tamanho * 0.01;
+    case 'mm': return tamanho * 0.001;
+  }
+}
+
+export function calcularConsumoCortes(cortes: CorteItem[]): number {
+  return cortes.reduce((sum, c) => sum + corteToMetros(c.tamanho, c.unidade) * c.quantidade, 0);
 }

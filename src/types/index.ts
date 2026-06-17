@@ -49,6 +49,16 @@ export type StatusProducao =
 
 export type SecaoFicha = 'corte' | 'aviamentos' | 'acabamento' | 'cliente' | 'travetes';
 
+export type UnidadeCorte = 'm' | 'cm' | 'mm';
+
+export interface CorteItem {
+  id: string;
+  descricao: string;
+  tamanho: number;
+  unidade: UnidadeCorte;
+  quantidade: number;
+}
+
 export type NivelUsuario = 'administrador' | 'estoque' | 'producao' | 'comercial';
 
 export interface Insumo {
@@ -83,6 +93,7 @@ export interface ItemFichaTecnica {
   insumoId: string;
   quantidade: number;
   secao: SecaoFicha;
+  cortes?: CorteItem[];
 }
 
 export interface CheckListItem {

@@ -1,15 +1,16 @@
-import { useState, useRef } from 'react';
-import { Plus, Search, Edit2, Trash2, FileText, X, Upload, Download, CheckCircle, AlertCircle, Package, Printer, FileDown, History } from 'lucide-react';
+import { useState, useRef, Fragment } from 'react';
+import { Plus, Search, Edit2, Trash2, FileText, X, Upload, Download, CheckCircle, AlertCircle, Package, Printer, FileDown, History, Scissors } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { useStore } from '../store/useStore';
 import type {
   FichaTecnica, ItemFichaTecnica, SecaoFicha,
   MoldeItem, CheckListItem, FichaCabecalho, CategoriaModelo,
+  CorteItem, UnidadeCorte,
 } from '../types';
 import Modal from '../components/Modal';
 import Badge from '../components/Badge';
 import { parseExcelFicha, processarImport } from '../utils/excelFicha';
-import { getGrupoInsumo, getSubcategoriaInsumo, GRUPO_LABELS } from '../utils/insumoHelpers';
+import { getGrupoInsumo, getSubcategoriaInsumo, GRUPO_LABELS, suportaCortes, calcularConsumoCortes, corteToMetros } from '../utils/insumoHelpers';
 import { exportarFichaTemplate } from '../lib/exportFichaTemplate';
 
 const SECAO_LABELS: Record<SecaoFicha, string> = {
@@ -81,6 +82,7 @@ export default function FichasTecnicas() {
   const [formTab, setFormTab] = useState<FormTab>('cabecalho');
   const [viewTab, setViewTab] = useState<ViewTab>('cabecalho');
   const [aviSecao, setAviSecao] = useState<AviSecao>('aviamentos');
+  const [activeCutsIdx, setActiveCutsIdx] = useState<number | null>(null);
 
   // Import state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -113,6 +115,32 @@ export default function FichasTecnicas() {
 
   const updateItem = (idx: number, patch: Partial<ItemFichaTecnica>) =>
     setForm(f => ({ ...f, itens: f.itens.map((item, i) => i === idx ? { ...item, ...patch } : item) }));
+
+  const changeFormTab = (tab: FormTab) => { setFormTab(tab); setActiveCutsIdx(null); };
+
+  const addCorte = (itemIdx: number) =>
+    setForm(f => ({
+      ...f,
+      itens: f.itens.map((item, i) => i === itemIdx
+        ? { ...item, cortes: [...(item.cortes ?? []), { id: uuidv4(), descricao: '', tamanho: 0, unidade: 'cm' as UnidadeCorte, quantidade: 1 }] }
+        : item),
+    }));
+
+  const removeCorte = (itemIdx: number, corteId: string) =>
+    setForm(f => ({
+      ...f,
+      itens: f.itens.map((item, i) => i === itemIdx
+        ? { ...item, cortes: (item.cortes ?? []).filter(c => c.id !== corteId) }
+        : item),
+    }));
+
+  const updateCorte = (itemIdx: number, corteId: string, patch: Partial<CorteItem>) =>
+    setForm(f => ({
+      ...f,
+      itens: f.itens.map((item, i) => i === itemIdx
+        ? { ...item, cortes: (item.cortes ?? []).map(c => c.id === corteId ? { ...c, ...patch } : c) }
+        : item),
+    }));
 
   const addMolde = () =>
     setForm(f => ({
@@ -318,7 +346,7 @@ export default function FichasTecnicas() {
           <button
             key={tab}
             type="button"
-            onClick={() => setFormTab(tab)}
+            onClick={() => changeFormTab(tab)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
               formTab === tab ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
@@ -492,46 +520,96 @@ export default function FichasTecnicas() {
                 .filter(({ item }) => item.secao === 'corte')
                 .map(({ item, idx }) => {
                   const insumo = insumos.find(ins => ins.id === item.insumoId);
+                  const hasCortes = !!insumo && suportaCortes(insumo);
+                  const cortes = item.cortes ?? [];
+                  const cutsOpen = activeCutsIdx === idx;
                   return (
-                    <div key={idx} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
-                      <select
-                        className="input text-xs flex-1"
-                        value={item.insumoId}
-                        onChange={e => updateItem(idx, { insumoId: e.target.value })}
-                      >
-                        <option value="">Selecionar insumo...</option>
-                        {Object.entries(
-                          insumos.reduce((acc, ins) => {
-                            const grupo = getGrupoInsumo(ins);
-                            const sub = getSubcategoriaInsumo(ins);
-                            const key = `${GRUPO_LABELS[grupo]} — ${sub}`;
-                            if (!acc[key]) acc[key] = [];
-                            acc[key].push(ins);
-                            return acc;
-                          }, {} as Record<string, typeof insumos>)
-                        ).map(([group, items]) => (
-                          <optgroup key={group} label={group}>
-                            {items.map(ins => (
-                              <option key={ins.id} value={ins.id}>{ins.nome}</option>
+                    <div key={idx}>
+                      <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
+                        <select
+                          className="input text-xs flex-1"
+                          value={item.insumoId}
+                          onChange={e => updateItem(idx, { insumoId: e.target.value })}
+                        >
+                          <option value="">Selecionar insumo...</option>
+                          {Object.entries(
+                            insumos.reduce((acc, ins) => {
+                              const grupo = getGrupoInsumo(ins);
+                              const sub = getSubcategoriaInsumo(ins);
+                              const key = `${GRUPO_LABELS[grupo]} — ${sub}`;
+                              if (!acc[key]) acc[key] = [];
+                              acc[key].push(ins);
+                              return acc;
+                            }, {} as Record<string, typeof insumos>)
+                          ).map(([group, items]) => (
+                            <optgroup key={group} label={group}>
+                              {items.map(ins => (
+                                <option key={ins.id} value={ins.id}>{ins.nome}</option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          step="0.001"
+                          className="input text-xs w-24"
+                          placeholder="Quantidade"
+                          value={item.quantidade}
+                          onChange={e => updateItem(idx, { quantidade: Number(e.target.value) })}
+                        />
+                        {insumo && <span className="text-xs text-slate-400 w-12 shrink-0">{insumo.unidade}</span>}
+                        {insumo && insumo.valorUnitario > 0 && (
+                          <span className="text-xs text-slate-500 w-20 text-right shrink-0">
+                            R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}
+                          </span>
+                        )}
+                        {hasCortes && (
+                          <button
+                            type="button"
+                            onClick={() => setActiveCutsIdx(cutsOpen ? null : idx)}
+                            className={`flex items-center gap-0.5 p-1 shrink-0 rounded transition-colors text-xs ${cutsOpen ? 'text-orange-600 bg-orange-100' : 'text-slate-400 hover:text-orange-500 hover:bg-orange-50'}`}
+                            title="Gerenciar cortes"
+                          >
+                            <Scissors size={12} />
+                            {cortes.length > 0 && <span>{cortes.length}</span>}
+                          </button>
+                        )}
+                        <button type="button" onClick={() => removeItem(idx)} className="text-slate-400 hover:text-red-500 p-1 shrink-0"><X size={12} /></button>
+                      </div>
+                      {cutsOpen && hasCortes && (
+                        <div className="ml-4 mt-1 mb-2 bg-orange-50 border border-orange-200 rounded-lg p-2">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-xs font-medium text-orange-700">Cortes — {insumo!.nome}</span>
+                            <button type="button" onClick={() => addCorte(idx)} className="text-xs text-orange-600 flex items-center gap-1 hover:underline">
+                              <Plus size={10} /> Adicionar corte
+                            </button>
+                          </div>
+                          <div className="space-y-1">
+                            {cortes.map(corte => (
+                              <div key={corte.id} className="flex items-center gap-1.5 bg-white rounded p-1.5">
+                                <input className="input text-xs flex-1 min-w-0" placeholder="Descrição (ex: Alça frontal)" value={corte.descricao} onChange={e => updateCorte(idx, corte.id, { descricao: e.target.value })} />
+                                <input type="number" step="0.01" min="0" className="input text-xs w-16" placeholder="Tamanho" value={corte.tamanho || ''} onChange={e => updateCorte(idx, corte.id, { tamanho: Number(e.target.value) })} />
+                                <select className="input text-xs w-16" value={corte.unidade} onChange={e => updateCorte(idx, corte.id, { unidade: e.target.value as UnidadeCorte })}>
+                                  <option value="m">m</option>
+                                  <option value="cm">cm</option>
+                                  <option value="mm">mm</option>
+                                </select>
+                                <span className="text-xs text-slate-400">×</span>
+                                <input type="number" min="1" className="input text-xs w-14" placeholder="Qtd" value={corte.quantidade || ''} onChange={e => updateCorte(idx, corte.id, { quantidade: Number(e.target.value) })} />
+                                <button type="button" onClick={() => removeCorte(idx, corte.id)} className="text-slate-400 hover:text-red-500 shrink-0"><X size={10} /></button>
+                              </div>
                             ))}
-                          </optgroup>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        step="0.001"
-                        className="input text-xs w-24"
-                        placeholder="Quantidade"
-                        value={item.quantidade}
-                        onChange={e => updateItem(idx, { quantidade: Number(e.target.value) })}
-                      />
-                      {insumo && <span className="text-xs text-slate-400 w-12 shrink-0">{insumo.unidade}</span>}
-                      {insumo && insumo.valorUnitario > 0 && (
-                        <span className="text-xs text-slate-500 w-20 text-right shrink-0">
-                          R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}
-                        </span>
+                            {cortes.length === 0 && (
+                              <p className="text-xs text-orange-600/60 text-center py-2">Nenhum corte adicionado</p>
+                            )}
+                          </div>
+                          {cortes.length > 0 && (
+                            <div className="mt-1.5 pt-1.5 border-t border-orange-200 text-right">
+                              <span className="text-xs text-orange-700 font-medium">Total: {calcularConsumoCortes(cortes).toFixed(3)}m/peça</span>
+                            </div>
+                          )}
+                        </div>
                       )}
-                      <button type="button" onClick={() => removeItem(idx)} className="text-slate-400 hover:text-red-500 p-1 shrink-0"><X size={12} /></button>
                     </div>
                   );
                 })}
@@ -574,46 +652,96 @@ export default function FichasTecnicas() {
                 .filter(({ item }) => item.secao === aviSecao)
                 .map(({ item, idx }) => {
                   const insumo = insumos.find(ins => ins.id === item.insumoId);
+                  const hasCortes = !!insumo && suportaCortes(insumo);
+                  const cortes = item.cortes ?? [];
+                  const cutsOpen = activeCutsIdx === idx;
                   return (
-                    <div key={idx} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
-                      <select
-                        className="input text-xs flex-1"
-                        value={item.insumoId}
-                        onChange={e => updateItem(idx, { insumoId: e.target.value })}
-                      >
-                        <option value="">Selecionar insumo...</option>
-                        {Object.entries(
-                          insumos.reduce((acc, ins) => {
-                            const grupo = getGrupoInsumo(ins);
-                            const sub = getSubcategoriaInsumo(ins);
-                            const key = `${GRUPO_LABELS[grupo]} — ${sub}`;
-                            if (!acc[key]) acc[key] = [];
-                            acc[key].push(ins);
-                            return acc;
-                          }, {} as Record<string, typeof insumos>)
-                        ).map(([group, items]) => (
-                          <optgroup key={group} label={group}>
-                            {items.map(ins => (
-                              <option key={ins.id} value={ins.id}>{ins.nome}</option>
+                    <div key={idx}>
+                      <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
+                        <select
+                          className="input text-xs flex-1"
+                          value={item.insumoId}
+                          onChange={e => updateItem(idx, { insumoId: e.target.value })}
+                        >
+                          <option value="">Selecionar insumo...</option>
+                          {Object.entries(
+                            insumos.reduce((acc, ins) => {
+                              const grupo = getGrupoInsumo(ins);
+                              const sub = getSubcategoriaInsumo(ins);
+                              const key = `${GRUPO_LABELS[grupo]} — ${sub}`;
+                              if (!acc[key]) acc[key] = [];
+                              acc[key].push(ins);
+                              return acc;
+                            }, {} as Record<string, typeof insumos>)
+                          ).map(([group, items]) => (
+                            <optgroup key={group} label={group}>
+                              {items.map(ins => (
+                                <option key={ins.id} value={ins.id}>{ins.nome}</option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          step="0.001"
+                          className="input text-xs w-24"
+                          placeholder="Quantidade"
+                          value={item.quantidade}
+                          onChange={e => updateItem(idx, { quantidade: Number(e.target.value) })}
+                        />
+                        {insumo && <span className="text-xs text-slate-400 w-12 shrink-0">{insumo.unidade}</span>}
+                        {insumo && insumo.valorUnitario > 0 && (
+                          <span className="text-xs text-slate-500 w-20 text-right shrink-0">
+                            R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}
+                          </span>
+                        )}
+                        {hasCortes && (
+                          <button
+                            type="button"
+                            onClick={() => setActiveCutsIdx(cutsOpen ? null : idx)}
+                            className={`flex items-center gap-0.5 p-1 shrink-0 rounded transition-colors text-xs ${cutsOpen ? 'text-orange-600 bg-orange-100' : 'text-slate-400 hover:text-orange-500 hover:bg-orange-50'}`}
+                            title="Gerenciar cortes"
+                          >
+                            <Scissors size={12} />
+                            {cortes.length > 0 && <span>{cortes.length}</span>}
+                          </button>
+                        )}
+                        <button type="button" onClick={() => removeItem(idx)} className="text-slate-400 hover:text-red-500 p-1 shrink-0"><X size={12} /></button>
+                      </div>
+                      {cutsOpen && hasCortes && (
+                        <div className="ml-4 mt-1 mb-2 bg-orange-50 border border-orange-200 rounded-lg p-2">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-xs font-medium text-orange-700">Cortes — {insumo!.nome}</span>
+                            <button type="button" onClick={() => addCorte(idx)} className="text-xs text-orange-600 flex items-center gap-1 hover:underline">
+                              <Plus size={10} /> Adicionar corte
+                            </button>
+                          </div>
+                          <div className="space-y-1">
+                            {cortes.map(corte => (
+                              <div key={corte.id} className="flex items-center gap-1.5 bg-white rounded p-1.5">
+                                <input className="input text-xs flex-1 min-w-0" placeholder="Descrição (ex: Alça frontal)" value={corte.descricao} onChange={e => updateCorte(idx, corte.id, { descricao: e.target.value })} />
+                                <input type="number" step="0.01" min="0" className="input text-xs w-16" placeholder="Tamanho" value={corte.tamanho || ''} onChange={e => updateCorte(idx, corte.id, { tamanho: Number(e.target.value) })} />
+                                <select className="input text-xs w-16" value={corte.unidade} onChange={e => updateCorte(idx, corte.id, { unidade: e.target.value as UnidadeCorte })}>
+                                  <option value="m">m</option>
+                                  <option value="cm">cm</option>
+                                  <option value="mm">mm</option>
+                                </select>
+                                <span className="text-xs text-slate-400">×</span>
+                                <input type="number" min="1" className="input text-xs w-14" placeholder="Qtd" value={corte.quantidade || ''} onChange={e => updateCorte(idx, corte.id, { quantidade: Number(e.target.value) })} />
+                                <button type="button" onClick={() => removeCorte(idx, corte.id)} className="text-slate-400 hover:text-red-500 shrink-0"><X size={10} /></button>
+                              </div>
                             ))}
-                          </optgroup>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        step="0.001"
-                        className="input text-xs w-24"
-                        placeholder="Quantidade"
-                        value={item.quantidade}
-                        onChange={e => updateItem(idx, { quantidade: Number(e.target.value) })}
-                      />
-                      {insumo && <span className="text-xs text-slate-400 w-12 shrink-0">{insumo.unidade}</span>}
-                      {insumo && insumo.valorUnitario > 0 && (
-                        <span className="text-xs text-slate-500 w-20 text-right shrink-0">
-                          R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}
-                        </span>
+                            {cortes.length === 0 && (
+                              <p className="text-xs text-orange-600/60 text-center py-2">Nenhum corte adicionado</p>
+                            )}
+                          </div>
+                          {cortes.length > 0 && (
+                            <div className="mt-1.5 pt-1.5 border-t border-orange-200 text-right">
+                              <span className="text-xs text-orange-700 font-medium">Total: {calcularConsumoCortes(cortes).toFixed(3)}m/peça</span>
+                            </div>
+                          )}
+                        </div>
                       )}
-                      <button type="button" onClick={() => removeItem(idx)} className="text-slate-400 hover:text-red-500 p-1 shrink-0"><X size={12} /></button>
                     </div>
                   );
                 })}
@@ -1203,18 +1331,29 @@ export default function FichasTecnicas() {
                     .filter(i => i.secao === 'corte')
                     .map((item, idx) => {
                       const insumo = insumos.find(ins => ins.id === item.insumoId);
+                      const cortes = item.cortes ?? [];
                       return (
-                        <div key={idx} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-slate-700">{insumo?.nome ?? '—'}</p>
-                            <p className="text-xs text-slate-400">{insumo?.codigo} · {insumo?.categoria}</p>
+                        <div key={idx} className="bg-slate-50 rounded-lg overflow-hidden">
+                          <div className="flex items-center justify-between px-3 py-2">
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-slate-700">{insumo?.nome ?? '—'}</p>
+                              <p className="text-xs text-slate-400">{insumo?.codigo} · {insumo?.categoria}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-medium text-slate-700">{item.quantidade} {insumo?.unidade ?? ''}</p>
+                              {insumo && insumo.valorUnitario > 0 && (
+                                <p className="text-xs text-slate-400">R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}</p>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-sm font-medium text-slate-700">{item.quantidade} {insumo?.unidade ?? ''}</p>
-                            {insumo && insumo.valorUnitario > 0 && (
-                              <p className="text-xs text-slate-400">R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}</p>
-                            )}
-                          </div>
+                          {cortes.length > 0 && (
+                            <div className="px-3 pb-2 pt-1 space-y-0.5 border-t border-orange-100 bg-orange-50/50">
+                              {cortes.map((c, ci) => (
+                                <p key={ci} className="text-xs text-slate-600">→ {c.descricao}: {c.tamanho}{c.unidade} × {c.quantidade}</p>
+                              ))}
+                              <p className="text-xs text-orange-600 font-medium">Total: {calcularConsumoCortes(cortes).toFixed(3)}m/peça</p>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1234,18 +1373,29 @@ export default function FichasTecnicas() {
                         <div className="divide-y divide-slate-50">
                           {items.map((item, idx) => {
                             const insumo = insumos.find(ins => ins.id === item.insumoId);
+                            const cortes = item.cortes ?? [];
                             return (
-                              <div key={idx} className="flex items-center justify-between px-3 py-2">
-                                <div className="flex-1">
-                                  <p className="text-sm text-slate-700">{insumo?.nome ?? '—'}</p>
-                                  <p className="text-xs text-slate-400">{insumo?.codigo}</p>
+                              <div key={idx}>
+                                <div className="flex items-center justify-between px-3 py-2">
+                                  <div className="flex-1">
+                                    <p className="text-sm text-slate-700">{insumo?.nome ?? '—'}</p>
+                                    <p className="text-xs text-slate-400">{insumo?.codigo}</p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-sm font-medium text-slate-600">{item.quantidade} {insumo?.unidade ?? ''}</p>
+                                    {insumo && insumo.valorUnitario > 0 && (
+                                      <p className="text-xs text-slate-400">R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}</p>
+                                    )}
+                                  </div>
                                 </div>
-                                <div className="text-right">
-                                  <p className="text-sm font-medium text-slate-600">{item.quantidade} {insumo?.unidade ?? ''}</p>
-                                  {insumo && insumo.valorUnitario > 0 && (
-                                    <p className="text-xs text-slate-400">R$ {(insumo.valorUnitario * item.quantidade).toFixed(2)}</p>
-                                  )}
-                                </div>
+                                {cortes.length > 0 && (
+                                  <div className="px-6 pb-2 pt-1 space-y-0.5 border-t border-orange-100 bg-orange-50/50">
+                                    {cortes.map((c, ci) => (
+                                      <p key={ci} className="text-xs text-slate-600">→ {c.descricao}: {c.tamanho}{c.unidade} × {c.quantidade}</p>
+                                    ))}
+                                    <p className="text-xs text-orange-600 font-medium">Total: {calcularConsumoCortes(cortes).toFixed(3)}m/peça</p>
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
@@ -1486,16 +1636,25 @@ export default function FichasTecnicas() {
                 <tbody>
                   {items.map((item, idx) => {
                     const ins = insumos.find(i => i.id === item.insumoId);
+                    const cortes = item.cortes ?? [];
                     return (
-                      <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
-                        <td className="p-1.5 font-medium text-slate-800">{ins?.nome ?? '—'}</td>
-                        <td className="p-1.5 text-slate-500">{ins ? getSubcategoriaInsumo(ins) : '—'}</td>
-                        <td className="p-1.5 text-right text-slate-700">{item.quantidade}</td>
-                        <td className="p-1.5 text-right text-slate-500">{ins?.unidade}</td>
-                        <td className="p-1.5 text-right font-semibold text-slate-800">
-                          {+(item.quantidade * qtdFicha).toFixed(3)}
-                        </td>
-                      </tr>
+                      <Fragment key={idx}>
+                        <tr className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                          <td className="p-1.5 font-medium text-slate-800">{ins?.nome ?? '—'}</td>
+                          <td className="p-1.5 text-slate-500">{ins ? getSubcategoriaInsumo(ins) : '—'}</td>
+                          <td className="p-1.5 text-right text-slate-700">{item.quantidade}</td>
+                          <td className="p-1.5 text-right text-slate-500">{ins?.unidade}</td>
+                          <td className="p-1.5 text-right font-semibold text-slate-800">
+                            {+(item.quantidade * qtdFicha).toFixed(3)}
+                          </td>
+                        </tr>
+                        {cortes.map((c, ci) => (
+                          <tr key={`c${ci}`} className="bg-orange-50/40">
+                            <td className="p-1 pl-5 text-slate-500 italic text-xs" colSpan={2}>→ {c.descricao}: {c.tamanho}{c.unidade} × {c.quantidade}</td>
+                            <td className="p-1 text-right text-xs text-orange-600" colSpan={3}>{corteToMetros(c.tamanho, c.unidade).toFixed(3)}m/corte</td>
+                          </tr>
+                        ))}
+                      </Fragment>
                     );
                   })}
                 </tbody>

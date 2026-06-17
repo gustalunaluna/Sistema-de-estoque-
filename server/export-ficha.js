@@ -1,281 +1,287 @@
 /**
- * Template-based Excel export for Fichas Técnicas.
- *
- * Strategy:
- *   1. Read ficha_tecnica_modelo.xlsx — preserves ALL formatting, merges, logos, borders.
- *   2. Write ONLY to data cells (name/qty/variant columns).
- *      Formula cells (TOTAL 1/2, cross-section references) are NEVER touched —
- *      Excel recalculates them on open.
- *   3. Sections 2–6 headers are formula references to Section 1 cells — auto-update.
- *
- * Template layout (1-indexed, A=1 … L=12):
- *
- *  SEC 1 – FICHA PRODUÇÃO CORTE        rows   4 –  84
- *    Header                            rows   6 –  14
- *    Tecidos (doubled rows 16+17…)     rows  16 –  39   (12 slots)
- *    Moldes / Gabaritos count          row   81
- *
- *  SEC 2 – FICHA PRODUÇÃO AVIAMENTO   rows  85 – 164
- *    Header (all formulas → sec 1)    rows  87 –  92
- *    AVIAMENTOS 1                      rows  94 – 127   (34 slots)
- *    ACABAMENTO                        rows 129 – 138   (10 slots)
- *    AVIAMENTOS CLIENTE                rows 140 – 144   (5 slots)
- *    TRAVETES                          rows 146 – 161   (16 slots)
- *
- *  SEC 3 – FICHA PRODUÇÃO MODELAGEM   rows 165 – 244
- *    Header + tecidos (formulas)       rows 167 – 182
- *    Moldes data                       rows 204 – 241   (38 slots)
- *
- *  SEC 4 – FICHA CONTROLE QUALIDADE   rows 245 – 266
- *    Header (formulas → sec 1)        rows 247 – 249
- *    Oficina / Fone                    row  250
- *    Custo / Qtd (independent)         row  252
- *
- *  SEC 5 – FICHA PRODUÇÃO CORTE copy  rows 267 – 294
- *    Header + custo (formulas)
- *    Qtd col F (hardcoded in template) row  274  col F
- *
- *  SEC 6 – ROMANEIO PRODUÇÃO          rows 295 – 320
- *    Header + custo (formulas)
- *    Oficina / Fone                    row  300
- *    Envio / Retirada / Qtd            row  306
- *    Descontos / Total                 rows 308, 310
+ * Simple from-scratch Excel export for Fichas Técnicas.
+ * Generates a clean functional spreadsheet using ExcelJS — no template file required.
  */
 
 const ExcelJS = require('exceljs');
-const path = require('path');
-const fs = require('fs');
 
-// ── Template resolution ────────────────────────────────────────────────────────
-function getTemplatePath() {
-  const candidates = [
-    path.join(__dirname, '..', 'public', 'templates', 'ficha_tecnica_modelo.xlsx'),
-    path.join(__dirname, '..', 'dist',   'templates', 'ficha_tecnica_modelo.xlsx'),
-    path.join(__dirname, '..', 'public', 'templates', 'ficha_tecnica_padrao.xlsx'),
-    path.join(__dirname, '..', 'dist',   'templates', 'ficha_tecnica_padrao.xlsx'),
-  ];
-  for (const p of candidates) if (fs.existsSync(p)) return p;
-  throw new Error(
-    'Template não encontrado. Coloque ficha_tecnica_modelo.xlsx em public/templates/'
-  );
-}
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-const safe = (v) => (v == null ? '' : String(v).trim());
-
-/** Parse a date string/value into a JS Date for proper Excel date serialisation. */
-function toDate(v) {
-  if (!v) return undefined;
-  if (v instanceof Date) return v;
-  const d = new Date(v);
-  return isNaN(d.getTime()) ? undefined : d;
-}
-
-/** Portuguese locale date string for display cells. */
-function fmtDate(v) {
-  const d = toDate(v);
-  return d ? d.toLocaleDateString('pt-BR') : '';
-}
-
-/**
- * Write a cell value only if the cell does NOT currently hold a formula.
- * Preserved formula cells auto-recalculate in Excel.
- */
-function setData(ws, row, col, value) {
-  const cell = ws.getCell(row, col);
-  const cv = cell.value;
-  const hasFormula = cv && typeof cv === 'object' && (cv.formula || cv.sharedFormula);
-  if (!hasFormula) {
-    cell.value = value;
+function corteToMetros(tamanho, unidade) {
+  switch (unidade) {
+    case 'm':  return tamanho;
+    case 'cm': return tamanho * 0.01;
+    case 'mm': return tamanho * 0.001;
+    default:   return tamanho;
   }
 }
 
-/**
- * Write material item data into a consecutive-row table (one item per row).
- * Only touches cols A (name), B (qty), C (variant/colour).
- * Formula columns D/E/I are preserved.
- * Also clears unused slots within maxRows.
- */
-function fillMaterialRows(ws, startRow, items, insumos, maxRows) {
-  for (let idx = 0; idx < maxRows; idx++) {
-    const row = startRow + idx;
-    if (idx < items.length) {
-      const item = items[idx];
-      const ins = insumos.find(i => i.id === item.insumoId);
-      if (ins) {
-        setData(ws, row, 1, ins.nome);
-        setData(ws, row, 2, item.quantidade);
-        setData(ws, row, 3, ins.subcategoria || ins.categoria || '');
-      }
-    } else {
-      setData(ws, row, 1, '');
-      setData(ws, row, 2, 0);
-      setData(ws, row, 3, '');
-    }
-  }
-}
+const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+const thinBorder = {
+  top: { style: 'thin' }, bottom: { style: 'thin' },
+  left: { style: 'thin' }, right: { style: 'thin' },
+};
+const hairBorder = {
+  bottom: { style: 'hair' },
+  left:   { style: 'thin' },
+  right:  { style: 'thin' },
+};
 
-/**
- * Write tecido items into the Section 1 doubled-row table.
- * Each visual slot occupies TWO physical rows (e.g. 16+17, 18+19 …).
- * We write to both rows; formula cols D/E/I are preserved.
- * Col G (variant-2 qty) and H (variant-2 cor) are cleared on each slot.
- */
-function fillTecidoRows(ws, startRow, items, insumos, maxItems) {
-  for (let idx = 0; idx < maxItems; idx++) {
-    const rowA = startRow + idx * 2;       // e.g. 16, 18, 20…
-    const rowB = rowA + 1;                 // e.g. 17, 19, 21…
+const COLORS = {
+  headerDark: 'FF1E293B',
+  labelBg:    'FFF1F5F9',
+  corte:      'FF1D4ED8',
+  aviamentos: 'FFEA580C',
+  acabamento: 'FF0D9488',
+  cliente:    'FF7C3AED',
+  travetes:   'FFE11D48',
+  moldes:     'FF475569',
+  tableHead:  'FFF1F5F9',
+  altRow:     'FFF8FAFC',
+  cutsRow:    'FFFFF7ED',
+  white:      'FFFFFFFF',
+};
 
-    if (idx < items.length) {
-      const item = items[idx];
-      const ins = insumos.find(i => i.id === item.insumoId);
-      if (ins) {
-        [rowA, rowB].forEach(r => {
-          setData(ws, r, 1, ins.nome);
-          setData(ws, r, 2, item.quantidade);
-          setData(ws, r, 3, ins.subcategoria || ins.categoria || '');
-          // Clear variant-2 fields so old template data doesn't bleed through
-          setData(ws, r, 7, 0);    // G = variante 2 qty
-          setData(ws, r, 8, '');   // H = variante 2 cor
-        });
-      }
-    } else {
-      [rowA, rowB].forEach(r => {
-        setData(ws, r, 1, '');
-        setData(ws, r, 2, 0);
-        setData(ws, r, 3, '');
-        setData(ws, r, 7, 0);
-        setData(ws, r, 8, '');
-      });
-    }
-  }
-}
+const SECTION_TITLES = {
+  corte:      'DIVISÃO DE TECIDOS — CORTE',
+  aviamentos: 'AVIAMENTOS 1',
+  acabamento: 'ACABAMENTO',
+  cliente:    'AVIAMENTOS CLIENTE',
+  travetes:   'TRAVETES',
+};
 
-// ── Main export ────────────────────────────────────────────────────────────────
+const SECTION_COLORS = {
+  corte:      COLORS.corte,
+  aviamentos: COLORS.aviamentos,
+  acabamento: COLORS.acabamento,
+  cliente:    COLORS.cliente,
+  travetes:   COLORS.travetes,
+};
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
 /**
  * @param {object} data
- * @param {import('../src/types').FichaTecnica} data.ficha
- * @param {import('../src/types').Modelo}       data.modelo
- * @param {import('../src/types').Insumo[]}     data.insumos
- * @param {number}                              data.versao
+ * @param {object} data.ficha
+ * @param {object} data.modelo
+ * @param {object[]} data.insumos
+ * @param {number}   data.versao
  * @returns {Promise<Buffer>}
  */
 async function exportarFichaExcel({ ficha, modelo, insumos = [], versao = 1 }) {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(getTemplatePath());
-  const ws = wb.worksheets[0];
+  wb.creator = 'Sistema de Estoque';
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet('Ficha Técnica');
+
+  ws.columns = [
+    { width: 36 }, // A – Material / Label
+    { width: 20 }, // B – Categoria / Value
+    { width: 12 }, // C – Qtd/Peça
+    { width: 10 }, // D – Unidade
+    { width: 12 }, // E – Total
+    { width: 14 }, // F – Custo Unit.
+    { width: 14 }, // G – Custo Total
+  ];
 
   const cab = ficha.cabecalho || {};
-  const qtdFicha  = Number(cab.quantidadeFicha)    || 1;
-  const custoUnid = Number(cab.custoConfeccaoUnid)  || 0;
-  const rom       = ficha.romaneio || {};
+  const qtdFicha  = Number(cab.quantidadeFicha)   || 1;
+  const custoUnid = Number(cab.custoConfeccaoUnid) || 0;
 
-  // Item partitions
-  const tecidos    = (ficha.itens || []).filter(i => i.secao === 'corte');
-  const avi1       = (ficha.itens || []).filter(i => i.secao === 'aviamentos');
-  const acabamento = (ficha.itens || []).filter(i => i.secao === 'acabamento');
-  const aviCli     = (ficha.itens || []).filter(i => i.secao === 'cliente');
-  const travetes   = (ficha.itens || []).filter(i => i.secao === 'travetes');
-  const moldes     = ficha.moldes || [];
+  let row = 1;
 
-  // ── SECTION 1 HEADER ────────────────────────────────────────────────────────
-  // Rows 2-6 of visible sections; all other sections ref these via formulas.
+  // ── TITLE ──────────────────────────────────────────────────────────────────
+  ws.mergeCells(`A${row}:G${row}`);
+  const titleCell = ws.getCell(row, 1);
+  titleCell.value     = `FICHA TÉCNICA DE PRODUÇÃO  |  ${(modelo.nome || '').toUpperCase()}  |  v${versao}`;
+  titleCell.fill      = fill(COLORS.headerDark);
+  titleCell.font      = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  titleCell.border    = thinBorder;
+  ws.getRow(row).height = 24;
+  row++;
 
-  // Row 6 — Cliente / Representante / Pedido / QTD Mostruário
-  ws.getCell(6, 1).value  = `CLIENTE: ${safe(cab.cliente)}`;
-  ws.getCell(6, 2).value  = `REPRESENTANTE: ${safe(cab.representante)}`;
-  ws.getCell(6, 7).value  = `PEDIDO: ${safe(cab.pedido)}`;
-  ws.getCell(6, 10).value = `QTD. MOSTR. ${cab.qtdMostruario || 0}`;
+  // ── CABEÇALHO ──────────────────────────────────────────────────────────────
+  const infoRows = [
+    ['Modelo',          modelo.nome   || '—', 'Código',           modelo.codigo    || '—'],
+    ['Cliente',         cab.cliente   || '—', 'Pedido',           cab.pedido       || '—'],
+    ['Representante',   cab.representante || '—', 'Ref. Cliente', cab.refCliente   || '—'],
+    ['Coleção',         cab.colecao   || '—', 'Ref. Matriz',      cab.refMatriz    || '—'],
+    ['Data Pedido',     cab.dataPedido    || '—', 'Data Entrega',  cab.dataEntrega  || '—'],
+    ['Início Produção', cab.inicioProducao || '—', 'Término Produção', cab.terminoProducao || '—'],
+    ['Qtd. Ficha',      qtdFicha,         'Custo/unid.',          `R$ ${custoUnid.toFixed(2)}`],
+    ['Total Ficha',     `R$ ${(custoUnid * qtdFicha).toFixed(2)}`, 'QTD Mostruário', cab.qtdMostruario || 0],
+    ['Oficina',         cab.oficina   || '—', 'Telefone',          cab.telefone     || '—'],
+    ['Cortador',        cab.cortador  || '—', 'Qtd Moldes',        cab.qtdMoldesTotal || 0],
+  ];
 
-  // Row 7 — Refs / Coleção
-  ws.getCell(7, 1).value  = `REF. CLIENTE: ${safe(cab.refCliente)}`;
-  ws.getCell(7, 2).value  = `REF. SAC LS  -  ${safe(cab.refMatriz)}`;
-  ws.getCell(7, 7).value  = `COLECAO : ${safe(cab.colecao)}`;
-  ws.getCell(7, 10).value = cab.qtdMostruario || 0;
-
-  // Row 8 — Ref + Modelo
-  ws.getCell(8, 1).value  = `REF: ${safe(cab.refCliente)}  ${safe(modelo.nome)}`;
-  ws.getCell(8, 2).value  = `MODELO: ${safe(modelo.nome)}`;
-
-  // Row 9 — Custo / Qtd Ficha   (J9 has formula SUM(C9*F9) → preserved)
-  ws.getCell(9, 3).value  = custoUnid;   // C9
-  ws.getCell(9, 6).value  = qtdFicha;   // F9
-
-  // Row 10 — Datas
-  ws.getCell(10, 2).value  = fmtDate(cab.dataPedido);
-  ws.getCell(10, 10).value = fmtDate(cab.dataEntrega);
-
-  // Row 12 — Produção window
-  ws.getCell(12, 2).value  = fmtDate(cab.inicioProducao);
-  ws.getCell(12, 10).value = fmtDate(cab.terminoProducao);
-
-  // Row 14 — Quantidade Ficha  (C14 is the anchor for all tecido formulas)
-  ws.getCell(14, 3).value = qtdFicha;   // C14
-  ws.getCell(14, 8).value = 0;          // H14 — variant 2 qty (zero = single variant)
-
-  // Tecidos  (12 slots, rows 16–38, doubled rows)
-  fillTecidoRows(ws, 16, tecidos, insumos, 12);
-
-  // Row 81 — Moldes / Gabaritos counts
-  setData(ws, 81, 2,  cab.qtdMoldesTotal || moldes.length || 0);
-  setData(ws, 81, 10, cab.qtdGabaritos   || 0);
-
-  // ── SECTION 2 MATERIALS (Aviamento sheet) ───────────────────────────────────
-  // Header rows 87–92 are formula refs → DO NOT TOUCH
-  fillMaterialRows(ws, 94,  avi1,       insumos, 34);
-  fillMaterialRows(ws, 129, acabamento, insumos, 10);
-  fillMaterialRows(ws, 140, aviCli,     insumos, 5);
-  fillMaterialRows(ws, 146, travetes,   insumos, 16);
-
-  // ── SECTION 3 MOLDES ─────────────────────────────────────────────────────────
-  // Tecido rows 171–182 are formula refs to sec 1 → auto-update
-  const maxMoldes = 38;
-  for (let idx = 0; idx < maxMoldes; idx++) {
-    const row = 204 + idx;
-    if (idx < moldes.length) {
-      const m = moldes[idx];
-      setData(ws, row, 1, m.descricao || '');
-      setData(ws, row, 2, m.numero    || '');
-      setData(ws, row, 3, m.quantidade || '');
-      setData(ws, row, 4, m.cor       || '');
-    } else {
-      setData(ws, row, 1, '');
-      setData(ws, row, 2, '');
-      setData(ws, row, 3, '');
-      setData(ws, row, 4, '');
-    }
+  for (const [l1, v1, l2, v2] of infoRows) {
+    const r = ws.getRow(row);
+    r.values = [l1, v1, '', l2, v2, '', ''];
+    r.height = 14;
+    // Label cells
+    [1, 4].forEach(col => {
+      const c = ws.getCell(row, col);
+      c.fill   = fill(COLORS.labelBg);
+      c.font   = { bold: true, size: 9 };
+      c.border = hairBorder;
+    });
+    // Value cells
+    [2, 5].forEach(col => {
+      const c = ws.getCell(row, col);
+      c.font   = { size: 9 };
+      c.border = hairBorder;
+    });
+    row++;
   }
 
-  // ── SECTION 4 CONTROLE QUALIDADE ─────────────────────────────────────────────
-  // Header rows 247–249 are formula refs → DO NOT TOUCH
-  // Oficina / Fone  (labels in A250/G250, values in adjacent cells)
-  setData(ws, 250, 2, safe(cab.oficina));
-  setData(ws, 250, 9, safe(cab.telefone));
-  // Independent custo/qtd (not a formula ref to sec 1)
-  setData(ws, 252, 3, custoUnid);   // C252
-  setData(ws, 252, 6, qtdFicha);   // F252 — J252 has formula C252*F252
+  row++; // spacer
 
-  // ── SECTION 5 FICHA CORTE copy ───────────────────────────────────────────────
-  // Header + custo are formula refs to sec 1 / sec 4
-  // F274 is hardcoded in template → update with qtdFicha
-  setData(ws, 274, 6, qtdFicha);
+  // ── MATERIAL SECTION ───────────────────────────────────────────────────────
+  const addSection = (secao, items) => {
+    if (items.length === 0) return;
 
-  // ── SECTION 6 ROMANEIO ──────────────────────────────────────────────────────
-  // Header + custo are formula refs → DO NOT TOUCH
-  setData(ws, 300, 2, safe(rom.oficina  || cab.oficina));
-  setData(ws, 300, 9, safe(rom.telefone || cab.telefone));
-  // Envio / Retirada / Quantidade (values go in row 306, below merged label row 304)
-  setData(ws, 306, 2,  fmtDate(rom.dataEnvio));
-  setData(ws, 306, 4,  fmtDate(rom.dataRetirada));
-  setData(ws, 306, 10, rom.qtdEnviada || qtdFicha);
-  // Descontos (K308) / Total (K310)
-  setData(ws, 308, 11, rom.desconto   || 0);
-  setData(ws, 310, 11, rom.totalFicha || +(custoUnid * qtdFicha).toFixed(2));
+    // Section header bar
+    ws.mergeCells(`A${row}:G${row}`);
+    const hCell = ws.getCell(row, 1);
+    hCell.value     = SECTION_TITLES[secao];
+    hCell.fill      = fill(SECTION_COLORS[secao]);
+    hCell.font      = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
+    hCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    hCell.border    = thinBorder;
+    ws.getRow(row).height = 16;
+    row++;
+
+    // Table header
+    const thRow = ws.getRow(row);
+    thRow.values = ['Material', 'Categoria', 'Qtd/Peça', 'Unidade', 'Total', 'Custo Unit.', 'Custo Total'];
+    thRow.height = 14;
+    for (let col = 1; col <= 7; col++) {
+      const c = ws.getCell(row, col);
+      c.fill      = fill(COLORS.tableHead);
+      c.font      = { bold: true, size: 8 };
+      c.alignment = col > 2 ? { horizontal: 'right' } : { horizontal: 'left' };
+      c.border    = thinBorder;
+    }
+    row++;
+
+    // Item rows
+    items.forEach((item, idx) => {
+      const ins       = insumos.find(i => i.id === item.insumoId);
+      const nome      = ins?.nome      ?? '—';
+      const cat       = ins?.subcategoria || ins?.categoria || '—';
+      const unidade   = ins?.unidade   ?? '';
+      const qty       = item.quantidade;
+      const total     = +(qty * qtdFicha).toFixed(3);
+      const custoUn   = ins?.valorUnitario ?? 0;
+      const custoTot  = +(custoUn * qty).toFixed(2);
+      const rowFill   = fill(idx % 2 === 1 ? COLORS.altRow : COLORS.white);
+
+      const r = ws.getRow(row);
+      r.values = [
+        nome,
+        cat,
+        qty,
+        unidade,
+        total,
+        custoUn > 0 ? `R$ ${custoUn.toFixed(2)}`   : '',
+        custoTot > 0 ? `R$ ${custoTot.toFixed(2)}` : '',
+      ];
+      r.height = 14;
+      for (let col = 1; col <= 7; col++) {
+        const c = ws.getCell(row, col);
+        c.fill      = rowFill;
+        c.font      = col === 1 ? { size: 9, bold: true } : { size: 9 };
+        c.alignment = col > 2 ? { horizontal: 'right' } : { horizontal: 'left' };
+        c.border    = hairBorder;
+      }
+      row++;
+
+      // Cut sub-rows
+      const cortes = item.cortes || [];
+      cortes.forEach(c => {
+        const metros = corteToMetros(c.tamanho, c.unidade);
+        const cr = ws.getRow(row);
+        cr.values = [
+          `  → ${c.descricao || '(sem descrição)'}`,
+          `${c.tamanho}${c.unidade} × ${c.quantidade}`,
+          '',
+          '',
+          `${metros.toFixed(3)}m/corte`,
+          '',
+          '',
+        ];
+        cr.height = 12;
+        for (let col = 1; col <= 7; col++) {
+          const cell = ws.getCell(row, col);
+          cell.fill      = fill(COLORS.cutsRow);
+          cell.font      = { size: 8, italic: true, color: { argb: 'FF92400E' } };
+          cell.alignment = col > 2 ? { horizontal: 'right' } : { horizontal: 'left', indent: 1 };
+          cell.border    = hairBorder;
+        }
+        row++;
+      });
+    });
+
+    row++; // spacer after section
+  };
+
+  for (const secao of ['corte', 'aviamentos', 'acabamento', 'cliente', 'travetes']) {
+    addSection(secao, (ficha.itens || []).filter(i => i.secao === secao));
+  }
+
+  // ── MOLDES ─────────────────────────────────────────────────────────────────
+  const moldes = ficha.moldes || [];
+  if (moldes.length > 0) {
+    ws.mergeCells(`A${row}:G${row}`);
+    const mhCell = ws.getCell(row, 1);
+    mhCell.value     = `MOLDES  (${moldes.length} peça${moldes.length !== 1 ? 's' : ''})`;
+    mhCell.fill      = fill(COLORS.moldes);
+    mhCell.font      = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
+    mhCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    mhCell.border    = thinBorder;
+    ws.getRow(row).height = 16;
+    row++;
+
+    const mthRow = ws.getRow(row);
+    mthRow.values = ['Descrição', 'Nº', 'Quantidade', 'Cor', '', '', ''];
+    mthRow.height = 14;
+    for (let col = 1; col <= 4; col++) {
+      const c = ws.getCell(row, col);
+      c.fill   = fill(COLORS.tableHead);
+      c.font   = { bold: true, size: 8 };
+      c.border = thinBorder;
+    }
+    row++;
+
+    moldes.forEach((m, idx) => {
+      const r = ws.getRow(row);
+      r.values = [m.descricao || '—', m.numero || '', m.quantidade || '', m.cor || '', '', '', ''];
+      r.height = 14;
+      for (let col = 1; col <= 4; col++) {
+        const c = ws.getCell(row, col);
+        c.fill   = fill(idx % 2 === 1 ? COLORS.altRow : COLORS.white);
+        c.font   = { size: 9 };
+        c.border = hairBorder;
+      }
+      row++;
+    });
+
+    row++;
+  }
+
+  // ── FOOTER ─────────────────────────────────────────────────────────────────
+  ws.mergeCells(`A${row}:G${row}`);
+  const footCell = ws.getCell(row, 1);
+  footCell.value     = `${modelo.nome}  ·  ${new Date().toLocaleString('pt-BR')}  ·  v${versao}`;
+  footCell.font      = { size: 8, color: { argb: 'FF94A3B8' } };
+  footCell.alignment = { horizontal: 'center' };
 
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-// ── Filename helper ────────────────────────────────────────────────────────────
+// ── Filename helper ───────────────────────────────────────────────────────────
 function buildFilename(modelo, versao) {
   const slug = [modelo.nome, modelo.codigo]
     .filter(Boolean)
