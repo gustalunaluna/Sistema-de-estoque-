@@ -670,7 +670,7 @@ export default function EstoqueInsumos() {
       {/* Modal Adicionar */}
       {modalAdd && (
         <Modal title="Novo Insumo" onClose={() => setModalAdd(false)} size="lg">
-          <FormInsumo />
+          {FormInsumo()}
           <div className="flex justify-end gap-2 mt-5">
             <button onClick={() => setModalAdd(false)} className="btn-ghost">Cancelar</button>
             <button onClick={handleAdd} className="btn-primary" disabled={!form.nome}>Salvar</button>
@@ -681,7 +681,7 @@ export default function EstoqueInsumos() {
       {/* Modal Editar */}
       {modalEdit && (
         <Modal title="Editar Insumo" onClose={() => setModalEdit(null)} size="lg">
-          <FormInsumo />
+          {FormInsumo()}
           <div className="flex justify-end gap-2 mt-5">
             <button onClick={() => setModalEdit(null)} className="btn-ghost">Cancelar</button>
             <button onClick={handleEdit} className="btn-primary">Salvar</button>

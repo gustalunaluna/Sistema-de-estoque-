@@ -334,7 +334,7 @@ export default function FichasTecnicas() {
 
     return (
       <div>
-        <FormTabBar />
+        {FormTabBar()}
 
         {/* ── Tab: Cabeçalho ───────────────────────────────── */}
         {formTab === 'cabecalho' && (
@@ -1075,7 +1075,7 @@ export default function FichasTecnicas() {
       {/* ── MODAL NOVA FICHA ───────────────────────────────── */}
       {modalAdd && (
         <Modal title="Nova Ficha Técnica" onClose={() => setModalAdd(false)} size="xl">
-          <FichaForm />
+          {FichaForm()}
           <div className="flex justify-end gap-2 mt-5">
             <button onClick={() => setModalAdd(false)} className="btn-ghost">Cancelar</button>
             <button
@@ -1092,7 +1092,7 @@ export default function FichasTecnicas() {
       {/* ── MODAL EDITAR ───────────────────────────────────── */}
       {modalEdit && (
         <Modal title="Editar Ficha Técnica" onClose={() => setModalEdit(null)} size="xl">
-          <FichaForm />
+          {FichaForm()}
           <div className="flex justify-end gap-2 mt-5">
             <button onClick={() => setModalEdit(null)} className="btn-ghost">Cancelar</button>
             <button onClick={handleEdit} className="btn-primary">Salvar</button>
@@ -1108,7 +1108,7 @@ export default function FichasTecnicas() {
           <Modal title={`Ficha Técnica — ${modelos.find(m => m.id === modalView.modeloId)?.nome}`} onClose={() => setModalView(null)} size="xl">
             <div className="space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <ViewTabBar />
+                {ViewTabBar()}
                 <div className="flex gap-2">
                   <span className="text-xs text-slate-400 self-center">v{modalView.versao ?? 1}</span>
                   <button
