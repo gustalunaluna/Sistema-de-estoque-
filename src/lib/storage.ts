@@ -5,6 +5,7 @@
 //  4. localStorage fallback (offline / dev without server)
 
 import { getSupabase, isSupabaseConfigured } from './supabase';
+import { markLocalSave, isSaveIgnored } from './realtime';
 
 export interface BackupInfo {
   filename: string;
@@ -63,8 +64,10 @@ async function supabaseLoad(): Promise<string | null> {
 }
 
 async function supabaseSave(value: string): Promise<void> {
+  if (isSaveIgnored()) return; // skip echo-back after receiving a remote update
   const sb = getSupabase();
   if (!sb) return;
+  markLocalSave(); // stamp before writing so Realtime ignores our own event
   const { error } = await sb
     .from('erp_data')
     .upsert(

@@ -1,5 +1,8 @@
+import { useEffect } from 'react';
 import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom';
 import { isElectron } from './lib/storage';
+import { subscribeToSync, startIgnoringSave } from './lib/realtime';
+import { useStore } from './store/useStore';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import EstoqueInsumos from './pages/EstoqueInsumos';
@@ -20,6 +23,18 @@ import Configuracoes from './pages/Configuracoes';
 const Router = isElectron() ? HashRouter : BrowserRouter;
 
 export default function App() {
+  useEffect(() => {
+    return subscribeToSync((jsonData) => {
+      try {
+        const parsed = JSON.parse(jsonData) as Record<string, unknown>;
+        // Zustand persist wraps state as { state: {...}, version: N }
+        const appState = (parsed?.state ?? parsed) as Record<string, unknown>;
+        startIgnoringSave(); // prevent the setState below from bouncing data back to Supabase
+        useStore.setState(appState);
+      } catch (_) {}
+    });
+  }, []);
+
   return (
     <Router>
       <Routes>
