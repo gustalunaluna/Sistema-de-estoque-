@@ -37,55 +37,119 @@ body {
   background: #94a3b8;
 }
 
-/* Print — only the ficha print area is shown when printing */
+/* ─── PRINT ──────────────────────────────────────────────────────────────────
+   The doPrint() function in FichasTecnicas.tsx moves #ficha-print-area to
+   <body> before calling window.print(), which lets the content flow naturally
+   across as many A4 pages as needed. These rules then handle visibility and
+   black-and-white styling.
+────────────────────────────────────────────────────────────────────────────── */
 @media print {
-  body * { visibility: hidden !important; }
+  /* 1. Hide everything in the page */
+  body > * {
+    visibility: hidden !important;
+  }
+
+  /* 2. Show only the print area (which was moved to <body> by JS) */
   #ficha-print-area,
-  #ficha-print-area * { visibility: visible !important; }
+  #ficha-print-area * {
+    visibility: visible !important;
+  }
+
+  /* 3. Print area: static flow so content spans as many pages as needed */
   #ficha-print-area {
-    position: fixed !important;
-    top: 0; left: 0;
-    width: 100vw !important;
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
     margin: 0 !important;
-    padding: 12mm !important;
+    padding: 0 !important;
     background: white !important;
-    font-size: 10pt !important;
-    /* Force the browser to actually print backgrounds/colors */
+    font-size: 9pt !important;
+    line-height: 1.4 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     color-adjust: exact !important;
   }
-  /* Propagate color-adjust to all descendants */
+
+  /* 4. Black & white — strip every color; make all text black */
   #ficha-print-area * {
+    color: #000 !important;
+    background-color: transparent !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  /* Convert every colored section header to black/white */
+
+  /* 5. Section headers → solid black background with white text */
+  #ficha-print-area .bg-slate-800,
+  #ficha-print-area .bg-slate-700,
+  #ficha-print-area .bg-slate-600,
   #ficha-print-area .bg-blue-700,
   #ficha-print-area .bg-orange-600,
   #ficha-print-area .bg-teal-600,
   #ficha-print-area .bg-violet-600,
-  #ficha-print-area .bg-rose-600,
-  #ficha-print-area .bg-slate-600,
-  #ficha-print-area .bg-slate-700,
-  #ficha-print-area .bg-slate-800 {
-    background-color: #111827 !important;
-    color: #ffffff !important;
+  #ficha-print-area .bg-rose-600 {
+    background-color: #111 !important;
+    color: #fff !important;
   }
-  /* Light alternating row backgrounds */
-  #ficha-print-area .bg-slate-50 {
-    background-color: #f9fafb !important;
+
+  /* Children of headers must also be white */
+  #ficha-print-area .bg-slate-800 *,
+  #ficha-print-area .bg-slate-700 *,
+  #ficha-print-area .bg-slate-600 *,
+  #ficha-print-area .bg-blue-700 *,
+  #ficha-print-area .bg-orange-600 *,
+  #ficha-print-area .bg-teal-600 *,
+  #ficha-print-area .bg-violet-600 *,
+  #ficha-print-area .bg-rose-600 * {
+    color: #fff !important;
+    background-color: transparent !important;
   }
-  /* Ensure all cell borders print */
+
+  /* 6. Table column headers: light gray fill */
+  #ficha-print-area thead th {
+    background-color: #ddd !important;
+    color: #000 !important;
+  }
+
+  /* 7. Alternating body row stripes */
+  #ficha-print-area tbody tr:nth-child(odd) td {
+    background-color: #fff !important;
+  }
+  #ficha-print-area tbody tr:nth-child(even) td {
+    background-color: #f3f3f3 !important;
+  }
+
+  /* 8. Borders: every table cell has a visible line on all sides */
   #ficha-print-area table {
     border-collapse: collapse !important;
+    border: 1pt solid #333 !important;
+    width: 100% !important;
   }
-  /* Keep each section together to avoid awkward mid-section page breaks */
+  #ficha-print-area th,
+  #ficha-print-area td {
+    border: 0.5pt solid #555 !important;
+  }
+
+  /* 9. Footer divider */
+  #ficha-print-area .border-t {
+    border-top: 0.5pt solid #999 !important;
+  }
+
+  /* 10. Title block outer border */
+  #ficha-print-area .border-2 {
+    border: 1.5pt solid #000 !important;
+  }
+
+  /* 11. Keep each section block on the same page when possible */
   #ficha-print-area .mb-3 {
     break-inside: avoid;
     page-break-inside: avoid;
   }
-  @page { margin: 10mm; size: A4 portrait; }
+
+  /* 12. Page settings */
+  @page {
+    margin: 12mm;
+    size: A4 portrait;
+  }
 }
 
 /* Kanban drag */

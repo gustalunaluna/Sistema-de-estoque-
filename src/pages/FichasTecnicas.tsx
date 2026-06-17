@@ -1671,6 +1671,31 @@ export default function FichasTecnicas() {
               { data: now2, versao: pFicha.versao ?? 1, tipo: tipo === 'pdf' ? 'pdf' : 'impressao' },
             ],
           });
+
+          // Move #ficha-print-area to <body> so it flows across multiple pages.
+          // A placeholder keeps its original position for restoring after print.
+          const el = document.getElementById('ficha-print-area');
+          let placeholder: HTMLElement | null = null;
+          if (el?.parentNode) {
+            placeholder = document.createElement('span');
+            placeholder.id = '__print_placeholder__';
+            el.parentNode.insertBefore(placeholder, el);
+            document.body.appendChild(el);
+          }
+
+          const restore = () => {
+            try {
+              const printEl = document.getElementById('ficha-print-area');
+              const ph = document.getElementById('__print_placeholder__');
+              if (printEl && ph?.parentNode) {
+                ph.parentNode.insertBefore(printEl, ph);
+                ph.parentNode.removeChild(ph);
+              }
+            } catch (_) { /* ignore cleanup errors */ }
+            window.removeEventListener('afterprint', restore);
+          };
+          window.addEventListener('afterprint', restore);
+
           window.print();
         };
 
