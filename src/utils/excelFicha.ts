@@ -334,6 +334,8 @@ export function processarImport(
     },
     tecidosCorte: [],
     aviamentosFicha: [],
+    versao: 1,
+    historicoExportes: [],
   };
 
   return { modeloNovo, fichaNova, insumosParaCriar, insumosResolvidos };

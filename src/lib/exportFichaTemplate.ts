@@ -8,14 +8,6 @@ interface ExportPayload {
   versao: number;
 }
 
-declare global {
-  interface Window {
-    electronAPI?: {
-      exportFichaExcel: (data: ExportPayload) => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
-    };
-  }
-}
-
 /** Download a blob as a file in the browser. */
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);

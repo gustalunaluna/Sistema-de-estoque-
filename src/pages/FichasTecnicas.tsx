@@ -57,6 +57,8 @@ const emptyForm = (modeloId = ''): FormState => ({
   cabecalho: DEFAULT_CABECALHO(),
   tecidosCorte: [],
   aviamentosFicha: [],
+  versao: 1,
+  historicoExportes: [],
   criarNovoModelo: false,
   novoModeloNome: '',
   novoModeloCodigo: '',

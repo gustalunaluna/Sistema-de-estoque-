@@ -28,6 +28,7 @@ interface ElectronAPI {
   onTriggerBackup: (cb: () => void) => () => void;
   getVersion: () => Promise<string>;
   openInExplorer: (path: string) => Promise<void>;
+  exportFichaExcel: (data: unknown) => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
 }
 
 declare global {
