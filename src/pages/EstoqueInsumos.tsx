@@ -1,13 +1,14 @@
 import { useState, useMemo } from 'react';
 import {
   Plus, Search, ArrowUpCircle, ArrowDownCircle, Edit2, Trash2,
-  TrendingDown, ChevronRight, ChevronDown, AlertTriangle, Tag,
+  TrendingDown, ChevronRight, ChevronDown, AlertTriangle, Tag, Boxes,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { Insumo, CategoriaInsumo, UnidadeMedida, GrupoPrincipal } from '../types';
 import Modal from '../components/Modal';
 import ImageUpload from '../components/ImageUpload';
-import { getGrupoInsumo, getSubcategoriaInsumo, GRUPO_LABELS } from '../utils/insumoHelpers';
+import { getGrupoInsumo, getSubcategoriaInsumo, GRUPO_LABELS, padronizarNomeInsumo } from '../utils/insumoHelpers';
+import { CATALOGO_INSUMOS, SUBCATEGORIAS_CATALOGO } from '../data/catalogoInsumos';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -124,6 +125,7 @@ export default function EstoqueInsumos() {
   const [modalMov, setModalMov] = useState<{ insumo: Insumo; tipo: 'entrada' | 'saida' } | null>(null);
   const [modalNovaSub, setModalNovaSub] = useState(false);
   const [novaSub, setNovaSub] = useState<{ grupo: GrupoPrincipal; nome: string }>({ grupo: 'aviamentos', nome: '' });
+  const [modalCatalogo, setModalCatalogo] = useState(false);
 
   const [form, setForm] = useState<FormData>(emptyForm());
   const [novaSubInline, setNovaSubInline] = useState('');
@@ -189,10 +191,12 @@ export default function EstoqueInsumos() {
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
-  const buildInsumoData = (f: FormData): Omit<Insumo, 'id' | 'criadoEm' | 'atualizadoEm'> => ({
+  const buildInsumoData = (f: FormData): Omit<Insumo, 'id' | 'criadoEm' | 'atualizadoEm'> => {
+    const nome = padronizarNomeInsumo(f.nome);
+    return {
     foto: f.foto,
-    nome: f.nome,
-    codigo: f.codigo || f.nome.toUpperCase().replace(/[^A-Z0-9]/g, '-').replace(/-+/g, '-').slice(0, 15),
+    nome,
+    codigo: f.codigo || nome.toUpperCase().replace(/[^A-Z0-9]/g, '-').replace(/-+/g, '-').slice(0, 15),
     categoria: categoriaFromGrupo(f.grupo),
     grupo: f.grupo,
     subcategoria: f.subcategoria,
@@ -201,7 +205,8 @@ export default function EstoqueInsumos() {
     quantidade: f.quantidade,
     estoqueMinimo: f.estoqueMinimo,
     valorUnitario: f.valorUnitario,
-  });
+    };
+  };
 
   const handleAdd = () => {
     addInsumo(buildInsumoData(form));
@@ -263,6 +268,46 @@ export default function EstoqueInsumos() {
     setForm(f => ({ ...f, subcategoria: nome }));
     setNovaSubInline('');
     setShowNovaSubInline(false);
+  };
+
+  // ── Catálogo padrão ───────────────────────────────────────────────────────────
+
+  // Itens do catálogo que ainda não existem no estoque (comparação por nome padronizado)
+  const catalogoNovos = useMemo(() => {
+    const existentes = new Set(insumos.map(i => padronizarNomeInsumo(i.nome).toLowerCase()));
+    return CATALOGO_INSUMOS.filter(item => !existentes.has(padronizarNomeInsumo(item.nome).toLowerCase()));
+  }, [insumos]);
+
+  const catalogoPorGrupo = useMemo(() => {
+    const map = new Map<GrupoPrincipal, number>();
+    catalogoNovos.forEach(item => map.set(item.grupo, (map.get(item.grupo) ?? 0) + 1));
+    return map;
+  }, [catalogoNovos]);
+
+  const importarCatalogo = () => {
+    // Cria subcategorias que ainda não existem
+    SUBCATEGORIAS_CATALOGO.forEach(sc => {
+      const existe = subcategorias.some(s => s.grupo === sc.grupo && s.nome.toLowerCase() === sc.nome.toLowerCase());
+      if (!existe) addSubcategoria(sc);
+    });
+
+    // Adiciona somente os itens que ainda não estão no estoque
+    catalogoNovos.forEach(item => {
+      const nome = padronizarNomeInsumo(item.nome);
+      addInsumo({
+        nome,
+        codigo: nome.toUpperCase().replace(/[^A-Z0-9]/g, '-').replace(/-+/g, '-').slice(0, 15),
+        categoria: categoriaFromGrupo(item.grupo),
+        grupo: item.grupo,
+        subcategoria: item.subcategoria,
+        unidade: item.unidade,
+        quantidade: 0,
+        estoqueMinimo: 0,
+        valorUnitario: 0,
+      });
+    });
+
+    setModalCatalogo(false);
   };
 
   // ── Totals ───────────────────────────────────────────────────────────────────
@@ -409,6 +454,18 @@ export default function EstoqueInsumos() {
           <p className="text-sm text-slate-500">{insumos.length} materiais cadastrados</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setModalCatalogo(true)}
+            className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
+          >
+            <Boxes size={15} />
+            Catálogo padrão
+            {catalogoNovos.length > 0 && (
+              <span className="ml-0.5 bg-blue-100 text-blue-700 text-xs font-semibold px-1.5 py-0.5 rounded-full">
+                {catalogoNovos.length}
+              </span>
+            )}
+          </button>
           <button
             onClick={() => setModalNovaSub(true)}
             className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
@@ -772,6 +829,71 @@ export default function EstoqueInsumos() {
                 disabled={!novaSub.nome.trim()}
               >
                 Criar Subcategoria
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal Catálogo padrão */}
+      {modalCatalogo && (
+        <Modal title="Catálogo padrão de insumos" onClose={() => setModalCatalogo(false)} size="lg">
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
+              <p className="font-semibold mb-1">O que será adicionado:</p>
+              <ul className="list-disc list-inside space-y-1 text-blue-700">
+                <li>Itens comuns de mochilas, pochetes, carteiras e malas de mão</li>
+                <li>Cursores, zíperes, fitas, reguladores, mosquetões, tecidos, espumas e mais</li>
+                <li>Os nomes seguem o padrão de escrita do sistema automaticamente</li>
+                <li>Itens já existentes no estoque <strong>não são duplicados</strong></li>
+                <li>Quantidade, estoque mínimo e valor entram zerados para você ajustar</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3">
+              <div className="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-slate-700">{CATALOGO_INSUMOS.length}</p>
+                <p className="text-xs text-slate-500">Itens no catálogo</p>
+              </div>
+              <div className="flex-1 bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-green-600">{catalogoNovos.length}</p>
+                <p className="text-xs text-green-700">Serão adicionados</p>
+              </div>
+              <div className="flex-1 bg-amber-50 border border-amber-200 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-amber-600">{CATALOGO_INSUMOS.length - catalogoNovos.length}</p>
+                <p className="text-xs text-amber-700">Já existem</p>
+              </div>
+            </div>
+
+            {catalogoNovos.length > 0 ? (
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700 mb-2">Novos itens por grupo:</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {GRUPOS_ORDEM.filter(g => catalogoPorGrupo.has(g)).map(g => (
+                    <div key={g} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                      <span className="flex items-center gap-2 text-sm text-slate-700">
+                        <span className={`w-2 h-2 rounded-full ${GRUPO_COLORS[g].dot}`} />
+                        {GRUPO_LABELS[g]}
+                      </span>
+                      <span className="text-sm font-semibold text-slate-600">{catalogoPorGrupo.get(g)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-center text-slate-400 py-4">
+                Todos os itens do catálogo já estão cadastrados no estoque.
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setModalCatalogo(false)} className="btn-ghost">Cancelar</button>
+              <button
+                onClick={importarCatalogo}
+                className="btn-primary"
+                disabled={catalogoNovos.length === 0}
+              >
+                <Plus size={16} /> Adicionar {catalogoNovos.length} {catalogoNovos.length === 1 ? 'item' : 'itens'}
               </button>
             </div>
           </div>
