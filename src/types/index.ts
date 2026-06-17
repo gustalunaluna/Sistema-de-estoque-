@@ -11,6 +11,20 @@ export type CategoriaInsumo =
   | 'acessorios'
   | 'outros';
 
+export type GrupoPrincipal =
+  | 'aviamentos'
+  | 'tecidos'
+  | 'linhas'
+  | 'reforcos'
+  | 'embalagens'
+  | 'outros';
+
+export interface Subcategoria {
+  id: string;
+  grupo: GrupoPrincipal;
+  nome: string;
+}
+
 export type CategoriaModelo =
   | 'mochilas'
   | 'bolsas'
@@ -43,6 +57,8 @@ export interface Insumo {
   nome: string;
   codigo: string;
   categoria: CategoriaInsumo;
+  grupo?: GrupoPrincipal;
+  subcategoria?: string;
   fornecedorId?: string;
   unidade: UnidadeMedida;
   quantidade: number;

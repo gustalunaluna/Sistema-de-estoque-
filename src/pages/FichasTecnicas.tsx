@@ -9,6 +9,7 @@ import type {
 import Modal from '../components/Modal';
 import Badge from '../components/Badge';
 import { parseExcelFicha, processarImport, exportarFichaExcel } from '../utils/excelFicha';
+import { getGrupoInsumo, getSubcategoriaInsumo, GRUPO_LABELS } from '../utils/insumoHelpers';
 
 const SECAO_LABELS: Record<SecaoFicha, string> = {
   corte: 'Corte',

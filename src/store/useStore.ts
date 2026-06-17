@@ -3,12 +3,65 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
   Insumo, MovimentacaoInsumo, Modelo, FichaTecnica, OrdemProducao,
   Cliente, Fornecedor, Compra, Orcamento, Usuario, HistoricoAlteracao,
-  StatusProducao, CheckListItem, ConfiguracaoApp, FichaCabecalho
+  StatusProducao, CheckListItem, ConfiguracaoApp, FichaCabecalho,
+  Subcategoria,
 } from '../types';
 import { appStorage } from '../lib/storage';
 import { v4 as uuidv4 } from 'uuid';
 
 const now = () => new Date().toISOString();
+
+const DEFAULT_SUBCATEGORIAS: Subcategoria[] = [
+  // Aviamentos
+  { id: 'sc-avi-cursor',     grupo: 'aviamentos', nome: 'Cursor' },
+  { id: 'sc-avi-ziper',      grupo: 'aviamentos', nome: 'Zíper' },
+  { id: 'sc-avi-regulador',  grupo: 'aviamentos', nome: 'Regulador' },
+  { id: 'sc-avi-passador',   grupo: 'aviamentos', nome: 'Passador' },
+  { id: 'sc-avi-fecho',      grupo: 'aviamentos', nome: 'Fecho' },
+  { id: 'sc-avi-mosquetao',  grupo: 'aviamentos', nome: 'Mosquetão' },
+  { id: 'sc-avi-argola',     grupo: 'aviamentos', nome: 'Argola' },
+  { id: 'sc-avi-puxador',    grupo: 'aviamentos', nome: 'Puxador' },
+  { id: 'sc-avi-ponteira',   grupo: 'aviamentos', nome: 'Ponteira' },
+  { id: 'sc-avi-fita',       grupo: 'aviamentos', nome: 'Fita' },
+  { id: 'sc-avi-alca',       grupo: 'aviamentos', nome: 'Alça' },
+  { id: 'sc-avi-cordao',     grupo: 'aviamentos', nome: 'Cordão' },
+  { id: 'sc-avi-elastico',   grupo: 'aviamentos', nome: 'Elástico' },
+  { id: 'sc-avi-velcro',     grupo: 'aviamentos', nome: 'Velcro' },
+  { id: 'sc-avi-rebite',     grupo: 'aviamentos', nome: 'Rebite' },
+  { id: 'sc-avi-etiqueta',   grupo: 'aviamentos', nome: 'Etiqueta' },
+  { id: 'sc-avi-patch',      grupo: 'aviamentos', nome: 'Patch' },
+  { id: 'sc-avi-ferragens',  grupo: 'aviamentos', nome: 'Ferragens' },
+  // Tecidos
+  { id: 'sc-tec-oxford',     grupo: 'tecidos', nome: 'Oxford' },
+  { id: 'sc-tec-ripstop',    grupo: 'tecidos', nome: 'Ripstop' },
+  { id: 'sc-tec-lona',       grupo: 'tecidos', nome: 'Lona' },
+  { id: 'sc-tec-nylon',      grupo: 'tecidos', nome: 'Nylon' },
+  { id: 'sc-tec-tactel',     grupo: 'tecidos', nome: 'Tactel' },
+  { id: 'sc-tec-microfibra', grupo: 'tecidos', nome: 'Microfibra' },
+  { id: 'sc-tec-mesh',       grupo: 'tecidos', nome: 'Mesh' },
+  { id: 'sc-tec-couro',      grupo: 'tecidos', nome: 'Couro Sintético' },
+  { id: 'sc-tec-pvc',        grupo: 'tecidos', nome: 'PVC' },
+  { id: 'sc-tec-outros',     grupo: 'tecidos', nome: 'Outros' },
+  // Linhas
+  { id: 'sc-lin-40',         grupo: 'linhas', nome: 'Linha 40' },
+  { id: 'sc-lin-60',         grupo: 'linhas', nome: 'Linha 60' },
+  { id: 'sc-lin-nylon',      grupo: 'linhas', nome: 'Linha Nylon' },
+  { id: 'sc-lin-algodao',    grupo: 'linhas', nome: 'Linha Algodão' },
+  { id: 'sc-lin-pesponto',   grupo: 'linhas', nome: 'Linha Pesponto' },
+  { id: 'sc-lin-outras',     grupo: 'linhas', nome: 'Outras' },
+  // Materiais de Reforço
+  { id: 'sc-ref-entretela',  grupo: 'reforcos', nome: 'Entretela' },
+  { id: 'sc-ref-espuma',     grupo: 'reforcos', nome: 'Espuma' },
+  { id: 'sc-ref-plastico',   grupo: 'reforcos', nome: 'Plástico Rígido' },
+  { id: 'sc-ref-outros',     grupo: 'reforcos', nome: 'Outros' },
+  // Embalagens
+  { id: 'sc-emb-caixa',      grupo: 'embalagens', nome: 'Caixa' },
+  { id: 'sc-emb-plastico',   grupo: 'embalagens', nome: 'Plástico' },
+  { id: 'sc-emb-papel',      grupo: 'embalagens', nome: 'Papel' },
+  { id: 'sc-emb-outros',     grupo: 'embalagens', nome: 'Outros' },
+  // Outros
+  { id: 'sc-out-outros',     grupo: 'outros', nome: 'Outros' },
+];
 
 const DEFAULT_CHECKLIST: CheckListItem[] = [
   { id: uuidv4(), descricao: 'Corte tecidos conferido', ok: null, responsavel: '', obs: '' },
@@ -52,6 +105,7 @@ interface AppState {
   compras: Compra[];
   orcamentos: Orcamento[];
   historico: HistoricoAlteracao[];
+  subcategorias: Subcategoria[];
 
   login: (email: string, senha: string) => boolean;
   logout: () => void;
@@ -94,16 +148,19 @@ interface AppState {
   addUsuario: (u: Omit<Usuario, 'id' | 'criadoEm'>) => void;
   updateUsuario: (id: string, data: Partial<Usuario>) => void;
   deleteUsuario: (id: string) => void;
+
+  addSubcategoria: (sc: Omit<Subcategoria, 'id'>) => void;
+  deleteSubcategoria: (id: string) => void;
 }
 
 const dadosIniciais = {
   insumos: [
-    { id: uuidv4(), nome: 'Cursor 7 Invertido', codigo: 'CUR-7-INV', categoria: 'cursores' as const, unidade: 'unidade' as const, quantidade: 5000, estoqueMinimo: 500, valorUnitario: 0.18, criadoEm: now(), atualizadoEm: now() },
-    { id: uuidv4(), nome: 'Cursor 7 Comum', codigo: 'CUR-7-COM', categoria: 'cursores' as const, unidade: 'unidade' as const, quantidade: 3000, estoqueMinimo: 300, valorUnitario: 0.15, criadoEm: now(), atualizadoEm: now() },
-    { id: uuidv4(), nome: 'Zíper 7', codigo: 'ZIP-7', categoria: 'zipes' as const, unidade: 'metro' as const, quantidade: 200, estoqueMinimo: 50, valorUnitario: 2.50, criadoEm: now(), atualizadoEm: now() },
-    { id: uuidv4(), nome: 'Etiqueta Bordada', codigo: 'ETI-BOR', categoria: 'etiquetas' as const, unidade: 'unidade' as const, quantidade: 2000, estoqueMinimo: 200, valorUnitario: 0.45, criadoEm: now(), atualizadoEm: now() },
-    { id: uuidv4(), nome: 'Fivela Plástica 25mm', codigo: 'FIV-P25', categoria: 'fivelas' as const, unidade: 'unidade' as const, quantidade: 800, estoqueMinimo: 100, valorUnitario: 0.35, criadoEm: now(), atualizadoEm: now() },
-    { id: uuidv4(), nome: 'Linha Preta 120', codigo: 'LIN-P120', categoria: 'linhas' as const, unidade: 'rolo' as const, quantidade: 12, estoqueMinimo: 3, valorUnitario: 18.00, criadoEm: now(), atualizadoEm: now() },
+    { id: uuidv4(), nome: 'Cursor 7 Invertido', codigo: 'CUR-7-INV', categoria: 'cursores' as const, grupo: 'aviamentos' as const, subcategoria: 'Cursor', unidade: 'unidade' as const, quantidade: 5000, estoqueMinimo: 500, valorUnitario: 0.18, criadoEm: now(), atualizadoEm: now() },
+    { id: uuidv4(), nome: 'Cursor 7 Comum', codigo: 'CUR-7-COM', categoria: 'cursores' as const, grupo: 'aviamentos' as const, subcategoria: 'Cursor', unidade: 'unidade' as const, quantidade: 3000, estoqueMinimo: 300, valorUnitario: 0.15, criadoEm: now(), atualizadoEm: now() },
+    { id: uuidv4(), nome: 'Zíper 7', codigo: 'ZIP-7', categoria: 'zipes' as const, grupo: 'aviamentos' as const, subcategoria: 'Zíper', unidade: 'metro' as const, quantidade: 200, estoqueMinimo: 50, valorUnitario: 2.50, criadoEm: now(), atualizadoEm: now() },
+    { id: uuidv4(), nome: 'Etiqueta Bordada', codigo: 'ETI-BOR', categoria: 'etiquetas' as const, grupo: 'aviamentos' as const, subcategoria: 'Etiqueta', unidade: 'unidade' as const, quantidade: 2000, estoqueMinimo: 200, valorUnitario: 0.45, criadoEm: now(), atualizadoEm: now() },
+    { id: uuidv4(), nome: 'Fivela Plástica 25mm', codigo: 'FIV-P25', categoria: 'fivelas' as const, grupo: 'aviamentos' as const, subcategoria: 'Fecho', unidade: 'unidade' as const, quantidade: 800, estoqueMinimo: 100, valorUnitario: 0.35, criadoEm: now(), atualizadoEm: now() },
+    { id: uuidv4(), nome: 'Linha Preta 120', codigo: 'LIN-P120', categoria: 'linhas' as const, grupo: 'linhas' as const, subcategoria: 'Linha 40', unidade: 'rolo' as const, quantidade: 12, estoqueMinimo: 3, valorUnitario: 18.00, criadoEm: now(), atualizadoEm: now() },
   ] as Insumo[],
   modelos: [
     { id: uuidv4(), nome: 'Mochila Hydro', codigo: 'MOD-HYD-001', categoria: 'mochilas' as const, status: 'aprovado' as const, descricao: 'Mochila resistente à água', observacoes: 'Modelo best-seller', galeria: [], criadoEm: now(), atualizadoEm: now() },
@@ -144,6 +201,7 @@ export const useStore = create<AppState>()(
       compras: [],
       orcamentos: [],
       historico: [],
+      subcategorias: DEFAULT_SUBCATEGORIAS,
 
       login: (email, _senha) => {
         const u = get().usuarios.find(u => u.email === email && u.ativo);
@@ -244,6 +302,9 @@ export const useStore = create<AppState>()(
       addUsuario: (data) => set(s => ({ usuarios: [...s.usuarios, { ...data, id: uuidv4(), criadoEm: now() }] })),
       updateUsuario: (id, data) => set(s => ({ usuarios: s.usuarios.map(u => u.id === id ? { ...u, ...data } : u) })),
       deleteUsuario: (id) => set(s => ({ usuarios: s.usuarios.filter(u => u.id !== id) })),
+
+      addSubcategoria: (data) => set(s => ({ subcategorias: [...s.subcategorias, { ...data, id: uuidv4() }] })),
+      deleteSubcategoria: (id) => set(s => ({ subcategorias: s.subcategorias.filter(sc => sc.id !== id) })),
     }),
     {
       name: 'fabrica-erp-v2',

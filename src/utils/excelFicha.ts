@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { Insumo, FichaTecnica, Modelo } from '../types';
+import type { Insumo, FichaTecnica, Modelo, GrupoPrincipal } from '../types';
 
 function detectUnit(nome: string, qtdPorPeca: number): Insumo['unidade'] {
   const n = nome.toLowerCase();
@@ -29,6 +29,53 @@ function detectCategory(nome: string): Insumo['categoria'] {
       n.includes('gomada')) return 'embalagens';
   if (n.includes('fita') || n.includes('algodão') || n.includes('velcro')) return 'acessorios';
   return 'acessorios';
+}
+
+export function detectGrupoSubcat(nome: string): { grupo: GrupoPrincipal; subcategoria: string } {
+  const n = nome.toLowerCase();
+
+  // Tecidos
+  if (n.includes('oxford')) return { grupo: 'tecidos', subcategoria: 'Oxford' };
+  if (n.includes('ripstop')) return { grupo: 'tecidos', subcategoria: 'Ripstop' };
+  if (n.includes('tactel')) return { grupo: 'tecidos', subcategoria: 'Tactel' };
+  if (n.includes('microfibra')) return { grupo: 'tecidos', subcategoria: 'Microfibra' };
+  if (n.includes('lona') || n.includes('lonita')) return { grupo: 'tecidos', subcategoria: 'Lona' };
+  if (n.includes('nylon')) return { grupo: 'tecidos', subcategoria: 'Nylon' };
+  if (n.includes('tecido')) return { grupo: 'tecidos', subcategoria: 'Outros' };
+
+  // Linhas
+  if (n.includes('linha')) return { grupo: 'linhas', subcategoria: 'Linha 40' };
+
+  // Embalagens
+  if (n.includes('embalagem') || n.includes('caixa') || n.includes('papelão') ||
+      n.includes('papel') || n.includes('plastico') || n.includes('plástico') ||
+      n.includes('gomada')) {
+    if (n.includes('caixa') || n.includes('papelão')) return { grupo: 'embalagens', subcategoria: 'Caixa' };
+    if (n.includes('papel')) return { grupo: 'embalagens', subcategoria: 'Papel' };
+    if (n.includes('plastico') || n.includes('plástico')) return { grupo: 'embalagens', subcategoria: 'Plástico' };
+    return { grupo: 'embalagens', subcategoria: 'Outros' };
+  }
+
+  // Aviamentos — specific types
+  if (n.includes('cursor')) return { grupo: 'aviamentos', subcategoria: 'Cursor' };
+  if (n.includes('zíper') || n.includes('ziper') || n.includes('zip')) return { grupo: 'aviamentos', subcategoria: 'Zíper' };
+  if (n.includes('regulador')) return { grupo: 'aviamentos', subcategoria: 'Regulador' };
+  if (n.includes('fivela') || n.includes('fecho')) return { grupo: 'aviamentos', subcategoria: 'Fecho' };
+  if (n.includes('argola')) return { grupo: 'aviamentos', subcategoria: 'Argola' };
+  if (n.includes('velcro')) return { grupo: 'aviamentos', subcategoria: 'Velcro' };
+  if (n.includes('elástico') || n.includes('elastico')) return { grupo: 'aviamentos', subcategoria: 'Elástico' };
+  if (n.includes('cordão') || n.includes('cordao')) return { grupo: 'aviamentos', subcategoria: 'Cordão' };
+  if (n.includes('fita')) return { grupo: 'aviamentos', subcategoria: 'Fita' };
+  if (n.includes('etiqueta') || n.includes('hangtag') || n.includes('tag')) return { grupo: 'aviamentos', subcategoria: 'Etiqueta' };
+  if (n.includes('rebite')) return { grupo: 'aviamentos', subcategoria: 'Rebite' };
+  if (n.includes('mosquetão') || n.includes('mosquetao')) return { grupo: 'aviamentos', subcategoria: 'Mosquetão' };
+  if (n.includes('puxador')) return { grupo: 'aviamentos', subcategoria: 'Puxador' };
+  if (n.includes('ponteira')) return { grupo: 'aviamentos', subcategoria: 'Ponteira' };
+  if (n.includes('alça') || n.includes('alca')) return { grupo: 'aviamentos', subcategoria: 'Alça' };
+  if (n.includes('passador')) return { grupo: 'aviamentos', subcategoria: 'Passador' };
+  if (n.includes('patch')) return { grupo: 'aviamentos', subcategoria: 'Patch' };
+
+  return { grupo: 'aviamentos', subcategoria: 'Ferragens' };
 }
 
 // Words that indicate a header/separator row inside a section
@@ -230,10 +277,13 @@ export function processarImport(
         jaAdicionados.add(nomeNorm);
         const unidade = detectUnit(item.nome, item.quantidade);
         const codigo = item.nome.toUpperCase().replace(/[^A-Z0-9]/g, '-').replace(/-+/g, '-').slice(0, 15);
+        const { grupo, subcategoria } = detectGrupoSubcat(item.nome);
         insumosParaCriar.push({
           nome: item.nome,
           codigo,
           categoria: detectCategory(item.nome),
+          grupo,
+          subcategoria,
           unidade,
           quantidade: 0,
           estoqueMinimo: 10,
