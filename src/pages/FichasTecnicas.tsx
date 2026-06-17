@@ -1451,58 +1451,110 @@ export default function FichasTecnicas() {
         if (!pModelo) return null;
         const cab = pFicha.cabecalho ?? {} as FichaCabecalho;
         const valorTotal = (cab.custoConfeccaoUnid ?? 0) * (cab.quantidadeFicha ?? 0);
-        const tecidos = pFicha.itens.filter(i => i.secao === 'corte');
-        const avi1 = pFicha.itens.filter(i => i.secao === 'aviamentos');
-        const acabamento = pFicha.itens.filter(i => i.secao === 'acabamento');
+        const pTecidos    = pFicha.itens.filter(i => i.secao === 'corte');
+        const pAvi1       = pFicha.itens.filter(i => i.secao === 'aviamentos');
+        const pAcabamento = pFicha.itens.filter(i => i.secao === 'acabamento');
+        const pAviCli     = pFicha.itens.filter(i => i.secao === 'cliente');
+        const pTravetes   = pFicha.itens.filter(i => i.secao === 'travetes');
+        const qtdFicha    = cab.quantidadeFicha || 1;
 
         const PrintRow = ({ label, value }: { label: string; value: string | number }) => (
           <tr className="border-b border-slate-100">
-            <td className="py-1 pr-3 text-xs text-slate-500 whitespace-nowrap">{label}</td>
-            <td className="py-1 text-xs font-medium text-slate-800">{value || '—'}</td>
+            <td className="py-1 pr-3 text-xs text-slate-500 whitespace-nowrap font-medium">{label}</td>
+            <td className="py-1 text-xs text-slate-800">{value || '—'}</td>
           </tr>
         );
 
-        const MaterialSection = ({ title, items }: { title: string; items: typeof tecidos }) => (
-          <div className="mb-4">
-            <div className="bg-slate-700 text-white text-xs font-semibold px-3 py-1 rounded-t">{title}</div>
-            <table className="w-full text-xs border border-slate-200 rounded-b overflow-hidden">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="p-1.5 text-left text-slate-500">Material</th>
-                  <th className="p-1.5 text-left text-slate-500">Subcategoria</th>
-                  <th className="p-1.5 text-right text-slate-500">Qtd/Peça</th>
-                  <th className="p-1.5 text-right text-slate-500">Unidade</th>
-                  <th className="p-1.5 text-right text-slate-500">Total Ficha</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item, idx) => {
-                  const ins = insumos.find(i => i.id === item.insumoId);
-                  return (
-                    <tr key={idx} className="border-t border-slate-50">
-                      <td className="p-1.5 font-medium text-slate-800">{ins?.nome ?? '—'}</td>
-                      <td className="p-1.5 text-slate-500">{ins ? getSubcategoriaInsumo(ins) : '—'}</td>
-                      <td className="p-1.5 text-right">{item.quantidade}</td>
-                      <td className="p-1.5 text-right text-slate-500">{ins?.unidade}</td>
-                      <td className="p-1.5 text-right font-medium">{+(item.quantidade * (cab.quantidadeFicha || 1)).toFixed(3)}</td>
-                    </tr>
-                  );
-                })}
-                {items.length === 0 && <tr><td colSpan={5} className="p-2 text-center text-slate-400">Nenhum item</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        );
+        type PrintItems = typeof pTecidos;
+        const MatSection = ({ title, color, items }: { title: string; color: string; items: PrintItems }) => {
+          if (items.length === 0) return null;
+          return (
+            <div className="mb-3">
+              <div className={`${color} text-white text-xs font-bold px-3 py-1.5 uppercase tracking-wider`}>{title}</div>
+              <table className="w-full text-xs border border-slate-200 border-t-0">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="p-1.5 text-left text-slate-500 font-medium w-[38%]">Material</th>
+                    <th className="p-1.5 text-left text-slate-500 font-medium w-[22%]">Categoria</th>
+                    <th className="p-1.5 text-right text-slate-500 font-medium">Qtd/Peça</th>
+                    <th className="p-1.5 text-right text-slate-500 font-medium">Un</th>
+                    <th className="p-1.5 text-right text-slate-500 font-medium">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item, idx) => {
+                    const ins = insumos.find(i => i.id === item.insumoId);
+                    return (
+                      <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                        <td className="p-1.5 font-medium text-slate-800">{ins?.nome ?? '—'}</td>
+                        <td className="p-1.5 text-slate-500">{ins ? getSubcategoriaInsumo(ins) : '—'}</td>
+                        <td className="p-1.5 text-right text-slate-700">{item.quantidade}</td>
+                        <td className="p-1.5 text-right text-slate-500">{ins?.unidade}</td>
+                        <td className="p-1.5 text-right font-semibold text-slate-800">
+                          {+(item.quantidade * qtdFicha).toFixed(3)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          );
+        };
+
+        const doPrint = (tipo: 'impressao' | 'pdf') => {
+          const now2 = new Date().toISOString();
+          updateFichaTecnica(pFicha.id, {
+            historicoExportes: [
+              ...(pFicha.historicoExportes ?? []),
+              { data: now2, versao: pFicha.versao ?? 1, tipo: tipo === 'pdf' ? 'pdf' : 'impressao' },
+            ],
+          });
+          window.print();
+        };
 
         return (
-          <Modal title="Imprimir / Salvar PDF" onClose={() => setModalPrint(null)} size="xl">
-            <div id="ficha-print-area" className="space-y-4 text-slate-800">
-              {/* Header */}
-              <div className="border-2 border-slate-800 rounded-lg overflow-hidden">
-                <div className="bg-slate-800 text-white text-center py-2 font-bold tracking-wide">
-                  FICHA TÉCNICA DE PRODUÇÃO — v{pFicha.versao ?? 1}
+          <Modal title={`Visualizar / Imprimir — ${pModelo.nome}`} onClose={() => setModalPrint(null)} size="xl">
+            {/* Action bar */}
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 print:hidden">
+              <p className="text-sm text-slate-500">
+                Pré-visualização da ficha — versão <strong className="text-blue-600">v{pFicha.versao ?? 1}</strong>
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleExportExcel(pFicha)}
+                  disabled={exportLoading === pFicha.id}
+                  className="flex items-center gap-1.5 bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+                >
+                  {exportLoading === pFicha.id
+                    ? <div className="w-3.5 h-3.5 border-2 border-green-200 border-t-transparent rounded-full animate-spin" />
+                    : <Download size={14} />}
+                  Exportar Excel
+                </button>
+                <button
+                  onClick={() => doPrint('pdf')}
+                  className="flex items-center gap-1.5 bg-red-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-700"
+                  title="Salvar como PDF: na janela de impressão escolha 'Salvar como PDF'"
+                >
+                  <FileText size={14} /> Salvar PDF
+                </button>
+                <button
+                  onClick={() => doPrint('impressao')}
+                  className="flex items-center gap-1.5 bg-purple-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-purple-700"
+                >
+                  <Printer size={14} /> Imprimir
+                </button>
+              </div>
+            </div>
+
+            {/* Print content */}
+            <div id="ficha-print-area" className="text-slate-800 bg-white">
+              {/* Title */}
+              <div className="border-2 border-slate-800 rounded-t-lg overflow-hidden mb-3">
+                <div className="bg-slate-800 text-white text-center py-2.5 font-bold tracking-widest text-sm uppercase">
+                  Ficha Técnica de Produção &nbsp;|&nbsp; v{pFicha.versao ?? 1}
                 </div>
-                <div className="grid grid-cols-2 gap-0 divide-x divide-slate-200">
+                <div className="grid grid-cols-2 divide-x divide-slate-200">
                   <table className="p-3 w-full">
                     <tbody>
                       <PrintRow label="Modelo:" value={pModelo.nome} />
@@ -1511,6 +1563,7 @@ export default function FichasTecnicas() {
                       <PrintRow label="Representante:" value={cab.representante ?? ''} />
                       <PrintRow label="Pedido:" value={cab.pedido ?? ''} />
                       <PrintRow label="Ref. Cliente:" value={cab.refCliente ?? ''} />
+                      <PrintRow label="Ref. Matriz:" value={cab.refMatriz ?? ''} />
                       <PrintRow label="Coleção:" value={cab.colecao ?? ''} />
                     </tbody>
                   </table>
@@ -1520,38 +1573,43 @@ export default function FichasTecnicas() {
                       <PrintRow label="Data Entrega:" value={cab.dataEntrega ?? ''} />
                       <PrintRow label="Início Produção:" value={cab.inicioProducao ?? ''} />
                       <PrintRow label="Término Produção:" value={cab.terminoProducao ?? ''} />
-                      <PrintRow label="Qtd Ficha:" value={cab.quantidadeFicha ?? 0} />
-                      <PrintRow label="Custo Confecção (un):" value={`R$ ${(cab.custoConfeccaoUnid ?? 0).toFixed(2)}`} />
-                      <PrintRow label="Valor Total:" value={`R$ ${valorTotal.toFixed(2)}`} />
+                      <PrintRow label="Quantidade Ficha:" value={cab.quantidadeFicha ?? 0} />
+                      <PrintRow label="Custo Confecção/un:" value={`R$ ${(cab.custoConfeccaoUnid ?? 0).toFixed(2)}`} />
+                      <PrintRow label="Valor Total Ficha:" value={`R$ ${valorTotal.toFixed(2)}`} />
+                      <PrintRow label="Oficina:" value={cab.oficina ?? ''} />
                     </tbody>
                   </table>
                 </div>
               </div>
 
               {/* Materials */}
-              <MaterialSection title="DIVISÃO DE TECIDOS (CORTE)" items={tecidos} />
-              <MaterialSection title="AVIAMENTOS 1" items={avi1} />
-              {acabamento.length > 0 && <MaterialSection title="ACABAMENTO" items={acabamento} />}
+              <MatSection title="Divisão de Tecidos — Corte" color="bg-blue-700"    items={pTecidos} />
+              <MatSection title="Aviamentos 1"                color="bg-orange-600" items={pAvi1} />
+              <MatSection title="Acabamento"                  color="bg-teal-600"   items={pAcabamento} />
+              <MatSection title="Aviamentos Cliente"          color="bg-violet-600" items={pAviCli} />
+              <MatSection title="Travetes"                    color="bg-rose-600"   items={pTravetes} />
 
               {/* Moldes */}
               {pFicha.moldes.length > 0 && (
-                <div>
-                  <div className="bg-slate-700 text-white text-xs font-semibold px-3 py-1 rounded-t">MOLDES</div>
-                  <table className="w-full text-xs border border-slate-200 rounded-b overflow-hidden">
+                <div className="mb-3">
+                  <div className="bg-slate-600 text-white text-xs font-bold px-3 py-1.5 uppercase tracking-wider">
+                    Moldes — {pFicha.moldes.length} peça{pFicha.moldes.length !== 1 ? 's' : ''}
+                  </div>
+                  <table className="w-full text-xs border border-slate-200 border-t-0">
                     <thead className="bg-slate-50">
                       <tr>
-                        {['Nº', 'Descrição', 'Quantidade', 'Cor'].map(h => (
-                          <th key={h} className="p-1.5 text-left text-slate-500">{h}</th>
+                        {['Nº', 'Descrição', 'Qtd', 'Cor'].map(h => (
+                          <th key={h} className="p-1.5 text-left text-slate-500 font-medium">{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {pFicha.moldes.map(m => (
-                        <tr key={m.id} className="border-t border-slate-50">
-                          <td className="p-1.5">{m.numero}</td>
-                          <td className="p-1.5 font-medium">{m.descricao || '—'}</td>
-                          <td className="p-1.5">{m.quantidade}</td>
-                          <td className="p-1.5">{m.cor || '—'}</td>
+                      {pFicha.moldes.map((m, idx) => (
+                        <tr key={m.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                          <td className="p-1.5 text-slate-600">{m.numero}</td>
+                          <td className="p-1.5 font-medium text-slate-800">{m.descricao || '—'}</td>
+                          <td className="p-1.5 text-slate-700">{m.quantidade}</td>
+                          <td className="p-1.5 text-slate-600">{m.cor || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1560,27 +1618,13 @@ export default function FichasTecnicas() {
               )}
 
               {/* Footer */}
-              <div className="text-xs text-slate-400 text-center border-t pt-2">
-                Gerado em {new Date().toLocaleString('pt-BR')} — Versão v{pFicha.versao ?? 1}
+              <div className="text-xs text-slate-400 text-center border-t border-slate-200 pt-2 mt-2">
+                {pModelo.nome} &nbsp;·&nbsp; {new Date().toLocaleString('pt-BR')} &nbsp;·&nbsp; v{pFicha.versao ?? 1}
               </div>
             </div>
 
-            <div className="flex justify-between items-center mt-5 pt-3 border-t">
+            <div className="flex justify-end mt-4 pt-3 border-t print:hidden">
               <button onClick={() => setModalPrint(null)} className="btn-ghost">Fechar</button>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    const now2 = new Date().toISOString();
-                    updateFichaTecnica(pFicha.id, {
-                      historicoExportes: [...(pFicha.historicoExportes ?? []), { data: now2, versao: pFicha.versao ?? 1, tipo: 'impressao' }],
-                    });
-                    window.print();
-                  }}
-                  className="flex items-center gap-1.5 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-700"
-                >
-                  <Printer size={15} /> Imprimir
-                </button>
-              </div>
             </div>
           </Modal>
         );

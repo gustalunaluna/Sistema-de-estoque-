@@ -316,9 +316,10 @@ ipcMain.handle('open-in-explorer', (_event, filePath) => shell.showItemInFolder(
 // ── Export Ficha Técnica (template-based Excel) ───────────────────────────────
 ipcMain.handle('export-ficha-excel', async (_event, { ficha, modelo, insumos, versao }) => {
   try {
-    const { exportarFichaExcel } = require(path.join(__dirname, '..', 'server', 'export-ficha.js'));
-    const buffer = await exportarFichaExcel({ ficha, modelo, insumos: insumos || [], versao: versao || 1 });
-    const filename = `FichaTecnica_${(modelo.codigo || modelo.nome).replace(/[^a-zA-Z0-9-_]/g, '_')}_v${versao || 1}.xlsx`;
+    const { exportarFichaExcel, buildFilename } = require(path.join(__dirname, '..', 'server', 'export-ficha.js'));
+    const v = versao || 1;
+    const buffer = await exportarFichaExcel({ ficha, modelo, insumos: insumos || [], versao: v });
+    const filename = buildFilename(modelo, v);
     const defaultPath = path.join(getErpRoot(), 'arquivos', 'documentos', filename);
     const { canceled, filePath } = await dialog.showSaveDialog({
       title: 'Salvar Ficha Técnica',

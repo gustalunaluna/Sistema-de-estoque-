@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { exportarFichaExcel } = require('./export-ficha');
+const { exportarFichaExcel, buildFilename } = require('./export-ficha');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -124,8 +124,9 @@ app.post('/api/export-ficha', async (req, res) => {
   try {
     const { ficha, modelo, insumos, versao } = req.body;
     if (!ficha || !modelo) return res.status(400).json({ ok: false, error: 'Dados insuficientes.' });
-    const buffer = await exportarFichaExcel({ ficha, modelo, insumos: insumos || [], versao: versao || 1 });
-    const filename = `FichaTecnica_${(modelo.codigo || modelo.nome).replace(/[^a-zA-Z0-9-_]/g, '_')}_v${versao || 1}.xlsx`;
+    const v = versao || 1;
+    const buffer = await exportarFichaExcel({ ficha, modelo, insumos: insumos || [], versao: v });
+    const filename = buildFilename(modelo, v);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);

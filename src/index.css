@@ -37,6 +37,23 @@ body {
   background: #94a3b8;
 }
 
+/* Print — only the ficha print area is shown when printing */
+@media print {
+  body * { visibility: hidden !important; }
+  #ficha-print-area,
+  #ficha-print-area * { visibility: visible !important; }
+  #ficha-print-area {
+    position: fixed !important;
+    top: 0; left: 0;
+    width: 100vw !important;
+    margin: 0 !important;
+    padding: 12mm !important;
+    background: white !important;
+    font-size: 10pt !important;
+  }
+  @page { margin: 10mm; size: A4 portrait; }
+}
+
 /* Kanban drag */
 .kanban-card {
   cursor: grab;

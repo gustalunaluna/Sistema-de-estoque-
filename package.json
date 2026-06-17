@@ -29,6 +29,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "server/**/*",
       "public/icon.png",
       "package.json"
     ],

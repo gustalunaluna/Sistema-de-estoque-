@@ -1,223 +1,289 @@
 /**
  * Template-based Excel export for Fichas Técnicas.
- * Reads ficha_tecnica_padrao.xlsx, fills in data at specific cell addresses,
- * and returns the buffer — preserving all formatting, borders, merges and logo.
  *
- * Template structure (1-indexed rows, 1-indexed cols A=1 … L=12):
- *  Section 1 – FICHA PRODUÇÃO CORTE      (rows   4 –  82)
- *  Section 2 – FICHA PRODUÇÃO AVIAMENTO  (rows  85 – 162)
- *  Section 3 – FICHA PRODUÇÃO MODELAGEM  (rows 165 – 242)
- *  Section 4 – FICHA CONTROLE QUALIDADE  (rows 245 – 266)
- *  Section 5 – FICHA PRODUÇÃO CORTE (copy for romaneio, rows 267-294)
- *  Section 6 – ROMANEIO PRODUÇÃO         (rows 295 – 312)
+ * Strategy:
+ *   1. Read ficha_tecnica_modelo.xlsx — preserves ALL formatting, merges, logos, borders.
+ *   2. Write ONLY to data cells (name/qty/variant columns).
+ *      Formula cells (TOTAL 1/2, cross-section references) are NEVER touched —
+ *      Excel recalculates them on open.
+ *   3. Sections 2–6 headers are formula references to Section 1 cells — auto-update.
+ *
+ * Template layout (1-indexed, A=1 … L=12):
+ *
+ *  SEC 1 – FICHA PRODUÇÃO CORTE        rows   4 –  84
+ *    Header                            rows   6 –  14
+ *    Tecidos (doubled rows 16+17…)     rows  16 –  39   (12 slots)
+ *    Moldes / Gabaritos count          row   81
+ *
+ *  SEC 2 – FICHA PRODUÇÃO AVIAMENTO   rows  85 – 164
+ *    Header (all formulas → sec 1)    rows  87 –  92
+ *    AVIAMENTOS 1                      rows  94 – 127   (34 slots)
+ *    ACABAMENTO                        rows 129 – 138   (10 slots)
+ *    AVIAMENTOS CLIENTE                rows 140 – 144   (5 slots)
+ *    TRAVETES                          rows 146 – 161   (16 slots)
+ *
+ *  SEC 3 – FICHA PRODUÇÃO MODELAGEM   rows 165 – 244
+ *    Header + tecidos (formulas)       rows 167 – 182
+ *    Moldes data                       rows 204 – 241   (38 slots)
+ *
+ *  SEC 4 – FICHA CONTROLE QUALIDADE   rows 245 – 266
+ *    Header (formulas → sec 1)        rows 247 – 249
+ *    Oficina / Fone                    row  250
+ *    Custo / Qtd (independent)         row  252
+ *
+ *  SEC 5 – FICHA PRODUÇÃO CORTE copy  rows 267 – 294
+ *    Header + custo (formulas)
+ *    Qtd col F (hardcoded in template) row  274  col F
+ *
+ *  SEC 6 – ROMANEIO PRODUÇÃO          rows 295 – 320
+ *    Header + custo (formulas)
+ *    Oficina / Fone                    row  300
+ *    Envio / Retirada / Qtd            row  306
+ *    Descontos / Total                 rows 308, 310
  */
 
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 
-// Resolve template path: public/ (dev) or dist/ (prod)
+// ── Template resolution ────────────────────────────────────────────────────────
 function getTemplatePath() {
   const candidates = [
+    path.join(__dirname, '..', 'public', 'templates', 'ficha_tecnica_modelo.xlsx'),
+    path.join(__dirname, '..', 'dist',   'templates', 'ficha_tecnica_modelo.xlsx'),
     path.join(__dirname, '..', 'public', 'templates', 'ficha_tecnica_padrao.xlsx'),
-    path.join(__dirname, '..', 'dist', 'templates', 'ficha_tecnica_padrao.xlsx'),
+    path.join(__dirname, '..', 'dist',   'templates', 'ficha_tecnica_padrao.xlsx'),
   ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
+  for (const p of candidates) if (fs.existsSync(p)) return p;
+  throw new Error(
+    'Template não encontrado. Coloque ficha_tecnica_modelo.xlsx em public/templates/'
+  );
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+const safe = (v) => (v == null ? '' : String(v).trim());
+
+/** Parse a date string/value into a JS Date for proper Excel date serialisation. */
+function toDate(v) {
+  if (!v) return undefined;
+  if (v instanceof Date) return v;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? undefined : d;
+}
+
+/** Portuguese locale date string for display cells. */
+function fmtDate(v) {
+  const d = toDate(v);
+  return d ? d.toLocaleDateString('pt-BR') : '';
+}
+
+/**
+ * Write a cell value only if the cell does NOT currently hold a formula.
+ * Preserved formula cells auto-recalculate in Excel.
+ */
+function setData(ws, row, col, value) {
+  const cell = ws.getCell(row, col);
+  const cv = cell.value;
+  const hasFormula = cv && typeof cv === 'object' && (cv.formula || cv.sharedFormula);
+  if (!hasFormula) {
+    cell.value = value;
   }
-  throw new Error('Template não encontrado. Verifique public/templates/ficha_tecnica_padrao.xlsx');
-}
-
-function fmtDate(s) {
-  if (!s) return '';
-  try {
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s;
-    return d.toLocaleDateString('pt-BR');
-  } catch (_) { return s; }
-}
-
-function safe(v) { return v ?? ''; }
-
-/**
- * Fill the repeating header block that appears in each section.
- * @param {ExcelJS.Worksheet} ws
- * @param {number} r - 1-indexed row of the CLIENTE line in this section
- * @param {object} cab - cabecalho data
- * @param {object} modelo - modelo data
- */
-function fillHeader(ws, r, cab, modelo) {
-  // Row r: CLIENTE / REPRESENTANTE / PEDIDO
-  ws.getCell(r, 1).value = `CLIENTE: ${safe(cab.cliente)}`;
-  ws.getCell(r, 2).value = `REPRESENTANTE: ${safe(cab.representante)}`;
-  ws.getCell(r, 7).value = `PEDIDO: ${safe(cab.pedido)}`;
-
-  // Row r+1: REF CLIENTE / REF MATRIZ / COLECAO / qtdMostruario
-  ws.getCell(r + 1, 1).value = `REF. CLIENTE: ${safe(cab.refCliente)}`;
-  ws.getCell(r + 1, 2).value = `REF. SAC LS  -  ${safe(cab.refMatriz)}`;
-  ws.getCell(r + 1, 7).value = `COLECAO : ${safe(cab.colecao)}`;
-  ws.getCell(r + 1, 10).value = cab.qtdMostruario || 0;
-
-  // Row r+2: REF full / MODELO
-  ws.getCell(r + 2, 1).value = `REF: ${safe(cab.refCliente)} — ${safe(modelo.nome)}`;
-  ws.getCell(r + 2, 2).value = `MODELO: ${safe(modelo.nome)}`;
 }
 
 /**
- * Write a list of material items into consecutive rows starting at startRow.
- * Columns: A=nome, B=qtd/unid, C=variante, D=total (qty*qtdFicha)
+ * Write material item data into a consecutive-row table (one item per row).
+ * Only touches cols A (name), B (qty), C (variant/colour).
+ * Formula columns D/E/I are preserved.
+ * Also clears unused slots within maxRows.
  */
-function fillMaterialRows(ws, startRow, items, insumos, qtdFicha, maxRows) {
-  for (let idx = 0; idx < Math.min(items.length, maxRows); idx++) {
-    const item = items[idx];
-    const insumo = insumos.find(i => i.id === item.insumoId);
-    if (!insumo) continue;
+function fillMaterialRows(ws, startRow, items, insumos, maxRows) {
+  for (let idx = 0; idx < maxRows; idx++) {
     const row = startRow + idx;
-    const total = +(item.quantidade * qtdFicha).toFixed(4);
-    ws.getCell(row, 1).value = insumo.nome;
-    ws.getCell(row, 2).value = item.quantidade;
-    ws.getCell(row, 3).value = insumo.subcategoria || '';
-    ws.getCell(row, 4).value = total;
-    // Clear TOTAL 2 column (col 9) if it had a formula placeholder
-    ws.getCell(row, 9).value = 0;
-  }
-  // Clear remaining pre-formatted rows
-  for (let idx = items.length; idx < maxRows; idx++) {
-    const row = startRow + idx;
-    ws.getCell(row, 1).value = '';
-    ws.getCell(row, 2).value = '';
-    ws.getCell(row, 3).value = '';
-    ws.getCell(row, 4).value = '';
+    if (idx < items.length) {
+      const item = items[idx];
+      const ins = insumos.find(i => i.id === item.insumoId);
+      if (ins) {
+        setData(ws, row, 1, ins.nome);
+        setData(ws, row, 2, item.quantidade);
+        setData(ws, row, 3, ins.subcategoria || ins.categoria || '');
+      }
+    } else {
+      setData(ws, row, 1, '');
+      setData(ws, row, 2, 0);
+      setData(ws, row, 3, '');
+    }
   }
 }
 
 /**
- * Fill tecido items in DIVISÃO TECIDOS (alternating rows: 16, 18, 20 …)
+ * Write tecido items into the Section 1 doubled-row table.
+ * Each visual slot occupies TWO physical rows (e.g. 16+17, 18+19 …).
+ * We write to both rows; formula cols D/E/I are preserved.
+ * Col G (variant-2 qty) and H (variant-2 cor) are cleared on each slot.
  */
-function fillTecidoRows(ws, startRow, items, insumos, qtdFicha, maxItems) {
-  for (let idx = 0; idx < Math.min(items.length, maxItems); idx++) {
-    const item = items[idx];
-    const insumo = insumos.find(i => i.id === item.insumoId);
-    if (!insumo) continue;
-    const row = startRow + idx * 2;
-    const total = +(item.quantidade * qtdFicha).toFixed(4);
-    ws.getCell(row, 1).value = insumo.nome;
-    ws.getCell(row, 2).value = item.quantidade;
-    ws.getCell(row, 3).value = insumo.subcategoria || '';
-    ws.getCell(row, 4).value = total;
-    ws.getCell(row, 9).value = 0;
-  }
-  // Clear remaining slots
-  for (let idx = items.length; idx < maxItems; idx++) {
-    const row = startRow + idx * 2;
-    ws.getCell(row, 1).value = '';
-    ws.getCell(row, 2).value = '';
-    ws.getCell(row, 3).value = '';
-    ws.getCell(row, 4).value = '';
+function fillTecidoRows(ws, startRow, items, insumos, maxItems) {
+  for (let idx = 0; idx < maxItems; idx++) {
+    const rowA = startRow + idx * 2;       // e.g. 16, 18, 20…
+    const rowB = rowA + 1;                 // e.g. 17, 19, 21…
+
+    if (idx < items.length) {
+      const item = items[idx];
+      const ins = insumos.find(i => i.id === item.insumoId);
+      if (ins) {
+        [rowA, rowB].forEach(r => {
+          setData(ws, r, 1, ins.nome);
+          setData(ws, r, 2, item.quantidade);
+          setData(ws, r, 3, ins.subcategoria || ins.categoria || '');
+          // Clear variant-2 fields so old template data doesn't bleed through
+          setData(ws, r, 7, 0);    // G = variante 2 qty
+          setData(ws, r, 8, '');   // H = variante 2 cor
+        });
+      }
+    } else {
+      [rowA, rowB].forEach(r => {
+        setData(ws, r, 1, '');
+        setData(ws, r, 2, 0);
+        setData(ws, r, 3, '');
+        setData(ws, r, 7, 0);
+        setData(ws, r, 8, '');
+      });
+    }
   }
 }
 
+// ── Main export ────────────────────────────────────────────────────────────────
 /**
- * Main export function.
  * @param {object} data
- * @param {object} data.ficha       - FichaTecnica object
- * @param {object} data.modelo      - Modelo object
- * @param {Array}  data.insumos     - All insumos in store
- * @param {number} data.versao      - Version number to stamp
+ * @param {import('../src/types').FichaTecnica} data.ficha
+ * @param {import('../src/types').Modelo}       data.modelo
+ * @param {import('../src/types').Insumo[]}     data.insumos
+ * @param {number}                              data.versao
  * @returns {Promise<Buffer>}
  */
-async function exportarFichaExcel({ ficha, modelo, insumos, versao = 1 }) {
-  const templatePath = getTemplatePath();
+async function exportarFichaExcel({ ficha, modelo, insumos = [], versao = 1 }) {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(templatePath);
+  await wb.xlsx.readFile(getTemplatePath());
   const ws = wb.worksheets[0];
 
   const cab = ficha.cabecalho || {};
-  const qtdFicha = cab.quantidadeFicha || 1;
-  const custoUnid = cab.custoConfeccaoUnid || 0;
-  const valorTotal = +(custoUnid * qtdFicha).toFixed(2);
+  const qtdFicha  = Number(cab.quantidadeFicha)    || 1;
+  const custoUnid = Number(cab.custoConfeccaoUnid)  || 0;
+  const rom       = ficha.romaneio || {};
 
-  // Separate items by section
-  const tecidos    = ficha.itens.filter(i => i.secao === 'corte');
-  const avi1       = ficha.itens.filter(i => i.secao === 'aviamentos');
-  const acabamento = ficha.itens.filter(i => i.secao === 'acabamento');
-  const aviCli     = ficha.itens.filter(i => i.secao === 'cliente');
-  const travetes   = ficha.itens.filter(i => i.secao === 'travetes');
+  // Item partitions
+  const tecidos    = (ficha.itens || []).filter(i => i.secao === 'corte');
+  const avi1       = (ficha.itens || []).filter(i => i.secao === 'aviamentos');
+  const acabamento = (ficha.itens || []).filter(i => i.secao === 'acabamento');
+  const aviCli     = (ficha.itens || []).filter(i => i.secao === 'cliente');
+  const travetes   = (ficha.itens || []).filter(i => i.secao === 'travetes');
   const moldes     = ficha.moldes || [];
 
-  // ── SECTION 1: FICHA PRODUÇÃO CORTE (header at row 6) ───────────────────────
-  fillHeader(ws, 6, cab, modelo);
-  ws.getCell(9, 3).value = custoUnid;
-  ws.getCell(9, 6).value = qtdFicha;
-  ws.getCell(9, 10).value = valorTotal;
-  ws.getCell(10, 2).value = fmtDate(cab.dataPedido);
+  // ── SECTION 1 HEADER ────────────────────────────────────────────────────────
+  // Rows 2-6 of visible sections; all other sections ref these via formulas.
+
+  // Row 6 — Cliente / Representante / Pedido / QTD Mostruário
+  ws.getCell(6, 1).value  = `CLIENTE: ${safe(cab.cliente)}`;
+  ws.getCell(6, 2).value  = `REPRESENTANTE: ${safe(cab.representante)}`;
+  ws.getCell(6, 7).value  = `PEDIDO: ${safe(cab.pedido)}`;
+  ws.getCell(6, 10).value = `QTD. MOSTR. ${cab.qtdMostruario || 0}`;
+
+  // Row 7 — Refs / Coleção
+  ws.getCell(7, 1).value  = `REF. CLIENTE: ${safe(cab.refCliente)}`;
+  ws.getCell(7, 2).value  = `REF. SAC LS  -  ${safe(cab.refMatriz)}`;
+  ws.getCell(7, 7).value  = `COLECAO : ${safe(cab.colecao)}`;
+  ws.getCell(7, 10).value = cab.qtdMostruario || 0;
+
+  // Row 8 — Ref + Modelo
+  ws.getCell(8, 1).value  = `REF: ${safe(cab.refCliente)}  ${safe(modelo.nome)}`;
+  ws.getCell(8, 2).value  = `MODELO: ${safe(modelo.nome)}`;
+
+  // Row 9 — Custo / Qtd Ficha   (J9 has formula SUM(C9*F9) → preserved)
+  ws.getCell(9, 3).value  = custoUnid;   // C9
+  ws.getCell(9, 6).value  = qtdFicha;   // F9
+
+  // Row 10 — Datas
+  ws.getCell(10, 2).value  = fmtDate(cab.dataPedido);
   ws.getCell(10, 10).value = fmtDate(cab.dataEntrega);
-  ws.getCell(12, 2).value = fmtDate(cab.inicioProducao);
+
+  // Row 12 — Produção window
+  ws.getCell(12, 2).value  = fmtDate(cab.inicioProducao);
   ws.getCell(12, 10).value = fmtDate(cab.terminoProducao);
-  ws.getCell(14, 3).value = qtdFicha;
 
-  // Tecidos: rows 16, 18, 20, … 38 (12 slots)
-  fillTecidoRows(ws, 16, tecidos, insumos, qtdFicha, 12);
+  // Row 14 — Quantidade Ficha  (C14 is the anchor for all tecido formulas)
+  ws.getCell(14, 3).value = qtdFicha;   // C14
+  ws.getCell(14, 8).value = 0;          // H14 — variant 2 qty (zero = single variant)
 
-  // ── SECTION 2: FICHA PRODUÇÃO AVIAMENTO (header at row 87) ──────────────────
-  fillHeader(ws, 87, cab, modelo);
-  ws.getCell(90, 2).value = fmtDate(cab.dataPedido);
-  ws.getCell(90, 10).value = fmtDate(cab.dataEntrega);
-  ws.getCell(92, 3).value = qtdFicha;
+  // Tecidos  (12 slots, rows 16–38, doubled rows)
+  fillTecidoRows(ws, 16, tecidos, insumos, 12);
 
-  // AVIAMENTOS 1: rows 94–127 (34 slots)
-  fillMaterialRows(ws, 94, avi1, insumos, qtdFicha, 34);
+  // Row 81 — Moldes / Gabaritos counts
+  setData(ws, 81, 2,  cab.qtdMoldesTotal || moldes.length || 0);
+  setData(ws, 81, 10, cab.qtdGabaritos   || 0);
 
-  // ACABAMENTO: rows 129–138 (10 slots)
-  fillMaterialRows(ws, 129, acabamento, insumos, qtdFicha, 10);
+  // ── SECTION 2 MATERIALS (Aviamento sheet) ───────────────────────────────────
+  // Header rows 87–92 are formula refs → DO NOT TOUCH
+  fillMaterialRows(ws, 94,  avi1,       insumos, 34);
+  fillMaterialRows(ws, 129, acabamento, insumos, 10);
+  fillMaterialRows(ws, 140, aviCli,     insumos, 5);
+  fillMaterialRows(ws, 146, travetes,   insumos, 16);
 
-  // AVIAMENTOS CLIENTE: rows 140–144 (5 slots)
-  fillMaterialRows(ws, 140, aviCli, insumos, qtdFicha, 5);
-
-  // TRAVETES: rows 146–161 (16 slots)
-  fillMaterialRows(ws, 146, travetes, insumos, qtdFicha, 16);
-
-  // ── SECTION 3: FICHA PRODUÇÃO MODELAGEM (header at row 167) ─────────────────
-  fillHeader(ws, 167, cab, modelo);
-
-  // Tecidos in modelagem: rows 171, 173, 175, 177, 179, 181 (6 slots, alternating)
-  fillTecidoRows(ws, 171, tecidos, insumos, qtdFicha, 6);
-
-  // Moldes (left column only): rows 204–241 (38 slots)
-  // Cols: A=desc, B=num, C=qty, D=cor
-  const maxMoldes = Math.min(moldes.length, 38);
+  // ── SECTION 3 MOLDES ─────────────────────────────────────────────────────────
+  // Tecido rows 171–182 are formula refs to sec 1 → auto-update
+  const maxMoldes = 38;
   for (let idx = 0; idx < maxMoldes; idx++) {
-    const m = moldes[idx];
     const row = 204 + idx;
-    ws.getCell(row, 1).value = m.descricao || '';
-    ws.getCell(row, 2).value = m.numero || '';
-    ws.getCell(row, 3).value = m.quantidade || '';
-    ws.getCell(row, 4).value = m.cor || '';
+    if (idx < moldes.length) {
+      const m = moldes[idx];
+      setData(ws, row, 1, m.descricao || '');
+      setData(ws, row, 2, m.numero    || '');
+      setData(ws, row, 3, m.quantidade || '');
+      setData(ws, row, 4, m.cor       || '');
+    } else {
+      setData(ws, row, 1, '');
+      setData(ws, row, 2, '');
+      setData(ws, row, 3, '');
+      setData(ws, row, 4, '');
+    }
   }
 
-  // ── SECTION 4: FICHA CONTROLE QUALIDADE (header at row 247) ─────────────────
-  fillHeader(ws, 247, cab, modelo);
-  ws.getCell(252, 3).value = custoUnid;
-  ws.getCell(252, 6).value = qtdFicha;
-  ws.getCell(252, 10).value = valorTotal;
+  // ── SECTION 4 CONTROLE QUALIDADE ─────────────────────────────────────────────
+  // Header rows 247–249 are formula refs → DO NOT TOUCH
+  // Oficina / Fone  (labels in A250/G250, values in adjacent cells)
+  setData(ws, 250, 2, safe(cab.oficina));
+  setData(ws, 250, 9, safe(cab.telefone));
+  // Independent custo/qtd (not a formula ref to sec 1)
+  setData(ws, 252, 3, custoUnid);   // C252
+  setData(ws, 252, 6, qtdFicha);   // F252 — J252 has formula C252*F252
 
-  // ── SECTION 5: Another CORTE copy (header at row 269) ───────────────────────
-  fillHeader(ws, 269, cab, modelo);
-  ws.getCell(274, 3).value = custoUnid;
-  ws.getCell(274, 6).value = qtdFicha;
-  ws.getCell(274, 10).value = valorTotal;
+  // ── SECTION 5 FICHA CORTE copy ───────────────────────────────────────────────
+  // Header + custo are formula refs to sec 1 / sec 4
+  // F274 is hardcoded in template → update with qtdFicha
+  setData(ws, 274, 6, qtdFicha);
 
-  // ── SECTION 6: ROMANEIO PRODUÇÃO (header at row 297) ────────────────────────
-  fillHeader(ws, 297, cab, modelo);
-  ws.getCell(302, 3).value = custoUnid;
-  ws.getCell(302, 6).value = qtdFicha;
-  ws.getCell(302, 10).value = valorTotal;
+  // ── SECTION 6 ROMANEIO ──────────────────────────────────────────────────────
+  // Header + custo are formula refs → DO NOT TOUCH
+  setData(ws, 300, 2, safe(rom.oficina  || cab.oficina));
+  setData(ws, 300, 9, safe(rom.telefone || cab.telefone));
+  // Envio / Retirada / Quantidade (values go in row 306, below merged label row 304)
+  setData(ws, 306, 2,  fmtDate(rom.dataEnvio));
+  setData(ws, 306, 4,  fmtDate(rom.dataRetirada));
+  setData(ws, 306, 10, rom.qtdEnviada || qtdFicha);
+  // Descontos (K308) / Total (K310)
+  setData(ws, 308, 11, rom.desconto   || 0);
+  setData(ws, 310, 11, rom.totalFicha || +(custoUnid * qtdFicha).toFixed(2));
 
-  // Stamp version number in a non-intrusive cell (bottom-right of first page)
-  ws.getCell(82, 12).value = `v${versao}`;
-
-  const buffer = await wb.xlsx.writeBuffer();
-  return Buffer.from(buffer);
+  return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-module.exports = { exportarFichaExcel };
+// ── Filename helper ────────────────────────────────────────────────────────────
+function buildFilename(modelo, versao) {
+  const slug = [modelo.nome, modelo.codigo]
+    .filter(Boolean)
+    .join('_')
+    .replace(/[^a-zA-Z0-9À-ÿ_\- ]/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 60);
+  return `Ficha_Tecnica_${slug}_V${versao}.xlsx`;
+}
+
+module.exports = { exportarFichaExcel, buildFilename };
