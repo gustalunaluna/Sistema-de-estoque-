@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Settings, Folder, FolderOpen, ExternalLink, Download,
   UploadCloud, RefreshCw, Clock, CheckCircle, AlertCircle,
-  HardDrive, Shield, ToggleLeft, ToggleRight, ArrowDownCircle, GitBranch,
+  HardDrive, Shield, ToggleLeft, ToggleRight, ArrowDownCircle, GitBranch, ServerOff,
 } from 'lucide-react';
 import {
   getDataPath, getErpRoot, chooseDataDir, isElectron, openInExplorer,
@@ -327,7 +327,21 @@ type UpdateInfo = {
   lastCommitDate: string;
 };
 
+async function checkApiHealth(): Promise<boolean> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 3000);
+    const res = await fetch('/api/health', { signal: ctrl.signal });
+    clearTimeout(t);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 function UpdateSection() {
+  // null = still checking, true/false = result
+  const [apiOk, setApiOk] = useState<boolean | null>(null);
   const [checking, setChecking] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [info, setInfo] = useState<UpdateInfo | null>(null);
@@ -335,6 +349,14 @@ function UpdateSection() {
   const [logs, setLogs] = useState<string[]>([]);
   const [done, setDone] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  // keep a stable ref so the SSE onerror closure sees the latest value
+  const doneRef = useRef(false);
+
+  // Check API availability on mount
+  useEffect(() => {
+    if (isElectron()) { setApiOk(false); return; }
+    checkApiHealth().then(setApiOk);
+  }, []);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -345,14 +367,24 @@ function UpdateSection() {
     setError(null);
     setInfo(null);
     setDone(false);
+    doneRef.current = false;
     setLogs([]);
     try {
-      const r = await fetch('/api/update/check');
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 30000);
+      const r = await fetch('/api/update/check', { signal: ctrl.signal });
+      clearTimeout(t);
       const data = await r.json();
       if (!data.ok) throw new Error(data.error);
       setInfo(data as UpdateInfo);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Erro ao verificar atualizações.');
+      const msg = e instanceof Error ? e.message : String(e);
+      // AbortError = timeout; TypeError = network unreachable
+      if (msg.includes('abort') || msg.toLowerCase().includes('failed to fetch') || msg.includes('network')) {
+        setError('Não foi possível conectar ao servidor. Verifique se o servidor está rodando com: npm run start');
+      } else {
+        setError(msg);
+      }
     } finally {
       setChecking(false);
     }
@@ -362,6 +394,7 @@ function UpdateSection() {
     setUpdating(true);
     setLogs([]);
     setDone(false);
+    doneRef.current = false;
     setError(null);
 
     const es = new EventSource('/api/update/apply');
@@ -371,20 +404,22 @@ function UpdateSection() {
       if (msg === '__DONE__') {
         es.close();
         setDone(true);
+        doneRef.current = true;
         setUpdating(false);
         setTimeout(() => window.location.reload(), 3000);
-      } else if (msg === '__ERROR__') {
+      } else if (msg.startsWith('__ERROR__')) {
         es.close();
         setUpdating(false);
+        setError('Ocorreu um erro durante a atualização. Veja o log acima.');
       } else {
         setLogs(prev => [...prev, msg]);
       }
     };
 
     es.onerror = () => {
-      // After server restarts, the SSE connection will close — that's expected
       es.close();
-      if (!done) {
+      // Connection closing is expected right after the server restarts
+      if (!doneRef.current) {
         setUpdating(false);
       }
     };
@@ -394,6 +429,48 @@ function UpdateSection() {
     ? (() => { try { return new Date(info.lastCommitDate).toLocaleString('pt-BR'); } catch { return info.lastCommitDate; } })()
     : '';
 
+  // ── Electron or API unavailable ──────────────────────────────────────────────
+  if (isElectron() || apiOk === false) {
+    return (
+      <section className="bg-white rounded-xl border border-slate-100 shadow-sm p-6 space-y-4">
+        <div className="flex items-center gap-2 text-slate-700 font-semibold text-base">
+          <ArrowDownCircle size={18} className="text-slate-400" />
+          Atualização do Sistema
+        </div>
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <ServerOff size={18} className="text-amber-500 shrink-0 mt-0.5" />
+          <div className="space-y-1.5">
+            <p className="text-sm font-semibold text-amber-800">
+              {isElectron() ? 'Não disponível no app desktop' : 'Servidor Express não detectado'}
+            </p>
+            <p className="text-xs text-amber-700">
+              {isElectron()
+                ? 'A atualização automática funciona apenas no modo servidor web. No app desktop, baixe o instalador mais recente manualmente.'
+                : 'A atualização automática requer o servidor Express rodando na porta 3000. Inicie o sistema com o comando abaixo e acesse novamente:'}
+            </p>
+            {!isElectron() && (
+              <code className="block mt-2 bg-amber-100 text-amber-900 rounded px-3 py-1.5 text-xs font-mono">
+                npm run start
+              </code>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // ── Still checking API ───────────────────────────────────────────────────────
+  if (apiOk === null) {
+    return (
+      <section className="bg-white rounded-xl border border-slate-100 shadow-sm p-6">
+        <div className="flex items-center gap-2 text-slate-500 text-sm">
+          <RefreshCw size={14} className="animate-spin" /> Verificando conexão com o servidor...
+        </div>
+      </section>
+    );
+  }
+
+  // ── Normal update UI ─────────────────────────────────────────────────────────
   return (
     <section className="bg-white rounded-xl border border-slate-100 shadow-sm p-6 space-y-4">
       <div className="flex items-center gap-2 text-slate-700 font-semibold text-base">
