@@ -469,8 +469,21 @@ export default function FichasTecnicas() {
                         onChange={e => updateItem(idx, { insumoId: e.target.value })}
                       >
                         <option value="">Selecionar insumo...</option>
-                        {insumos.map(ins => (
-                          <option key={ins.id} value={ins.id}>{ins.nome}</option>
+                        {Object.entries(
+                          insumos.reduce((acc, ins) => {
+                            const grupo = getGrupoInsumo(ins);
+                            const sub = getSubcategoriaInsumo(ins);
+                            const key = `${GRUPO_LABELS[grupo]} — ${sub}`;
+                            if (!acc[key]) acc[key] = [];
+                            acc[key].push(ins);
+                            return acc;
+                          }, {} as Record<string, typeof insumos>)
+                        ).map(([group, items]) => (
+                          <optgroup key={group} label={group}>
+                            {items.map(ins => (
+                              <option key={ins.id} value={ins.id}>{ins.nome}</option>
+                            ))}
+                          </optgroup>
                         ))}
                       </select>
                       <input
@@ -538,8 +551,21 @@ export default function FichasTecnicas() {
                         onChange={e => updateItem(idx, { insumoId: e.target.value })}
                       >
                         <option value="">Selecionar insumo...</option>
-                        {insumos.map(ins => (
-                          <option key={ins.id} value={ins.id}>{ins.nome}</option>
+                        {Object.entries(
+                          insumos.reduce((acc, ins) => {
+                            const grupo = getGrupoInsumo(ins);
+                            const sub = getSubcategoriaInsumo(ins);
+                            const key = `${GRUPO_LABELS[grupo]} — ${sub}`;
+                            if (!acc[key]) acc[key] = [];
+                            acc[key].push(ins);
+                            return acc;
+                          }, {} as Record<string, typeof insumos>)
+                        ).map(([group, items]) => (
+                          <optgroup key={group} label={group}>
+                            {items.map(ins => (
+                              <option key={ins.id} value={ins.id}>{ins.nome}</option>
+                            ))}
+                          </optgroup>
                         ))}
                       </select>
                       <input
