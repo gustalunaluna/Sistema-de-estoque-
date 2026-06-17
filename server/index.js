@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { exportarFichaExcel, buildFilename } = require('./export-ficha');
+const { checkUpdate, applyUpdate, scheduleRestart } = require('./update');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -134,6 +135,41 @@ app.post('/api/export-ficha', async (req, res) => {
     console.error('Erro ao exportar ficha:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// ── Update system ─────────────────────────────────────────────────────────────
+
+// Check if a newer version exists on the remote
+app.get('/api/update/check', (req, res) => {
+  try {
+    const info = checkUpdate();
+    res.json({ ok: true, ...info });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Apply update — streams progress via Server-Sent Events, then restarts
+app.get('/api/update/apply', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering if present
+  res.flushHeaders();
+
+  const send = (msg) => {
+    res.write(`data: ${JSON.stringify(msg)}\n\n`);
+  };
+
+  try {
+    applyUpdate(send);
+  } catch (err) {
+    send(`❌ Erro: ${err.message}`);
+    send('__ERROR__');
+  }
+
+  res.end();
+  scheduleRestart();
 });
 
 // All other routes → serve React app (handles React Router client-side navigation)

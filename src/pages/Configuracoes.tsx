@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Settings, Folder, FolderOpen, ExternalLink, Download,
   UploadCloud, RefreshCw, Clock, CheckCircle, AlertCircle,
-  HardDrive, Shield, ToggleLeft, ToggleRight,
+  HardDrive, Shield, ToggleLeft, ToggleRight, ArrowDownCircle, GitBranch,
 } from 'lucide-react';
 import {
   getDataPath, getErpRoot, chooseDataDir, isElectron, openInExplorer,
@@ -316,6 +316,197 @@ function BackupSection() {
   );
 }
 
+// ── Update section ────────────────────────────────────────────────────────────
+type UpdateInfo = {
+  hasUpdate: boolean;
+  branch: string;
+  currentVersion: string;
+  latestVersion: string;
+  behind: number;
+  lastCommitMsg: string;
+  lastCommitDate: string;
+};
+
+function UpdateSection() {
+  const [checking, setChecking] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [info, setInfo] = useState<UpdateInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [done, setDone] = useState(false);
+  const logsEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+
+  const checkForUpdates = async () => {
+    setChecking(true);
+    setError(null);
+    setInfo(null);
+    setDone(false);
+    setLogs([]);
+    try {
+      const r = await fetch('/api/update/check');
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error);
+      setInfo(data as UpdateInfo);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erro ao verificar atualizações.');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const applyUpdate = () => {
+    setUpdating(true);
+    setLogs([]);
+    setDone(false);
+    setError(null);
+
+    const es = new EventSource('/api/update/apply');
+
+    es.onmessage = (e) => {
+      const msg: string = JSON.parse(e.data);
+      if (msg === '__DONE__') {
+        es.close();
+        setDone(true);
+        setUpdating(false);
+        setTimeout(() => window.location.reload(), 3000);
+      } else if (msg === '__ERROR__') {
+        es.close();
+        setUpdating(false);
+      } else {
+        setLogs(prev => [...prev, msg]);
+      }
+    };
+
+    es.onerror = () => {
+      // After server restarts, the SSE connection will close — that's expected
+      es.close();
+      if (!done) {
+        setUpdating(false);
+      }
+    };
+  };
+
+  const lastDate = info?.lastCommitDate
+    ? (() => { try { return new Date(info.lastCommitDate).toLocaleString('pt-BR'); } catch { return info.lastCommitDate; } })()
+    : '';
+
+  return (
+    <section className="bg-white rounded-xl border border-slate-100 shadow-sm p-6 space-y-4">
+      <div className="flex items-center gap-2 text-slate-700 font-semibold text-base">
+        <ArrowDownCircle size={18} className="text-blue-600" />
+        Atualização do Sistema
+      </div>
+
+      <p className="text-sm text-slate-500">
+        Verifique e instale a versão mais recente do GitHub sem abrir o VS Code — o sistema baixa o código, compila e reinicia automaticamente.
+      </p>
+
+      {/* Error */}
+      {error && (
+        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+          <AlertCircle size={15} className="shrink-0 mt-0.5" />
+          <span className="break-all">{error}</span>
+        </div>
+      )}
+
+      {/* Update info card */}
+      {info && !done && (
+        <div className={`rounded-lg border p-4 space-y-3 ${info.hasUpdate ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'}`}>
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            {info.hasUpdate
+              ? <AlertCircle size={15} className="text-blue-600" />
+              : <CheckCircle size={15} className="text-green-600" />}
+            <span className={info.hasUpdate ? 'text-blue-800' : 'text-green-800'}>
+              {info.hasUpdate
+                ? `Nova versão disponível! (${info.behind} commit${info.behind !== 1 ? 's' : ''} atrás)`
+                : 'O sistema está atualizado!'}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs text-slate-600">
+            <div className="flex items-center gap-1.5">
+              <GitBranch size={11} className="text-slate-400" />
+              <span className="font-medium">Branch:</span>
+              <span className="font-mono">{info.branch}</span>
+            </div>
+            <div>
+              <span className="font-medium">Versão atual:</span>
+              <span className="font-mono ml-1">{info.currentVersion}</span>
+            </div>
+            <div>
+              <span className="font-medium">Última atualização:</span>
+              <span className="ml-1">{lastDate}</span>
+            </div>
+            <div>
+              <span className="font-medium">Versão remota:</span>
+              <span className="font-mono ml-1">{info.latestVersion}</span>
+            </div>
+          </div>
+          {info.hasUpdate && info.lastCommitMsg && (
+            <p className="text-xs text-slate-500 italic border-t border-blue-100 pt-2">
+              "{info.lastCommitMsg}"
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Done banner */}
+      {done && (
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm font-medium">
+          <CheckCircle size={16} />
+          Atualização concluída! O sistema vai recarregar em instantes...
+        </div>
+      )}
+
+      {/* Progress log */}
+      {logs.length > 0 && (
+        <div className="bg-slate-900 rounded-lg p-3 font-mono text-xs text-green-400 max-h-52 overflow-y-auto">
+          {logs.map((l, i) => <div key={i} className="leading-5">{l}</div>)}
+          {updating && (
+            <div className="flex items-center gap-1 text-slate-500 mt-1">
+              <RefreshCw size={10} className="animate-spin" />
+              <span>processando...</span>
+            </div>
+          )}
+          <div ref={logsEndRef} />
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={checkForUpdates}
+          disabled={checking || updating}
+          className="flex items-center gap-1.5 bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
+          {checking ? 'Verificando...' : 'Verificar atualizações'}
+        </button>
+
+        {info?.hasUpdate && !done && (
+          <button
+            onClick={applyUpdate}
+            disabled={updating}
+            className="flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {updating
+              ? <><RefreshCw size={14} className="animate-spin" /> Atualizando...</>
+              : <><Download size={14} /> Atualizar agora</>}
+          </button>
+        )}
+      </div>
+
+      <p className="text-xs text-slate-400">
+        A atualização não apaga seus dados — apenas o código do aplicativo é substituído.
+        O servidor reinicia automaticamente após a compilação (~30 segundos).
+      </p>
+    </section>
+  );
+}
+
 // ── Factory info section ──────────────────────────────────────────────────────
 function FabricaSection() {
   const { configuracao, updateConfiguracao } = useStore();
@@ -406,6 +597,7 @@ export default function Configuracoes() {
         <p className="text-sm text-slate-500">Armazenamento, backup e informações da empresa</p>
       </div>
 
+      <UpdateSection />
       <StorageSection />
       <BackupSection />
       <FabricaSection />
